@@ -8,11 +8,13 @@ This project builds an **intelligent learning path generation system** that crea
 * Completed courses
 * Course metadata (summary, prerequisites, duration)
 * Target expertise (e.g., Java, Data Engineering)
+* **Practice → Skill mapping (NEW enhancement)**
 
 The system combines:
 
 * **Rule-based planning (deterministic core)**
 * **Semantic search (ChromaDB)**
+* **Practice-aware recommendation engine (NEW)**
 * **Optional LLM reasoning (GenAI enhancement)**
 
 ---
@@ -23,11 +25,85 @@ The system combines:
 * Remove **already completed courses**
 * Maintain **prerequisite order**
 * Optimize plan based on **annual training hours**
+* Use **practice-based skills for relevance**
 * Provide **explanations using LLM (optional)**
 
 ---
 
-## 🧱 High-Level Architecture
+## 🧠 Practice → Skill Mapping (CORE INTELLIGENCE LAYER 🔥)
+
+### 📌 Why this is needed
+
+The `user_master` table contains:
+
+* `emp_practise`
+
+But it does NOT define:
+
+* primary technical skills
+* course recommendations
+
+👉 This layer bridges that gap.
+
+---
+
+### 🔷 Practice Mapping
+
+#### 🟦 Application Services
+
+**Skills:**
+
+* Programming (Java, Python, .NET)
+* Backend / Frontend
+* Testing (Selenium)
+* Architecture (OOP, Design Patterns)
+
+---
+
+#### 🟩 BPS (Business Process Services)
+
+**Skills:**
+
+* Communication
+* Business processes
+* Domain knowledge
+* Coordination
+
+---
+
+#### 🟨 Cloud & Security
+
+**Skills:**
+
+* Cloud platforms
+* Networking
+* Cybersecurity
+* DevOps
+
+---
+
+### 🧩 Implementation
+
+```python
+PRACTICE_SKILL_MAP = {
+    "Application Services": [
+        "java", "python", "programming", "testing",
+        "backend", "frontend", "architecture"
+    ],
+    "BPS": [
+        "communication", "business", "process",
+        "domain", "coordination"
+    ],
+    "Cloud & Security": [
+        "cloud", "networking", "security",
+        "devops", "infrastructure"
+    ]
+}
+```
+
+---
+
+## 🧱 High-Level Architecture (UPDATED)
 
 ```
                 ┌────────────────────┐
@@ -40,28 +116,31 @@ The system combines:
                 │ (Core Orchestrator)│
                 └─────────┬──────────┘
                           │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-┌──────────────┐  ┌──────────────┐  ┌────────────────┐
-│ User Service │  │ Completion   │  │ Course Service │
-│ (Pandas)     │  │ Service      │  │ + ChromaDB     │
-└──────────────┘  └──────────────┘  └────────────────┘
-        │                 │                 │
-        └────────────┬────┴───────┬────────┘
-                     ▼            ▼
-              ┌────────────────────────┐
-              │ Learning Plan Engine   │
-              │ - Filter completed     │
-              │ - Resolve prerequisites│
-              │ - Optimize hours       │
-              └────────────┬───────────┘
-                           ▼
-                 ┌────────────────────┐
-                 │ LLM (Optional)     │
-                 │ Explanation Layer  │
-                 └────────────────────┘
-                           ▼
-                    Final Response
+        ┌─────────────────┼──────────────────┐
+        ▼                 ▼                  ▼
+┌──────────────┐  ┌──────────────┐  ┌────────────────────┐
+│ User Service │  │ Completion   │  │ Course Service     │
+│ (Pandas)     │  │ Service      │  │ + ChromaDB         │
+└──────────────┘  └──────────────┘  └────────────────────┘
+        │
+        ▼
+┌────────────────────────────┐
+│ Practice → Skill Mapper 🔥 │
+└────────────┬───────────────┘
+             ▼
+      ┌───────────────────────┐
+      │ Learning Plan Engine  │
+      │ - Filter completed    │
+      │ - Resolve prereq      │
+      │ - Optimize hours      │
+      └────────────┬──────────┘
+                   ▼
+         ┌────────────────────┐
+         │ LLM (Optional)     │
+         │ Explanation Layer  │
+         └────────────────────┘
+                   ▼
+            Final Response
 ```
 
 ---
@@ -72,21 +151,20 @@ The system combines:
 ai-learning-path-assistant/
 │
 ├── data/
-│   ├── raw/                 # Excel files
-│   ├── processed/           # Clean CSVs
-│   └── chroma/              # Vector DB storage
+│   ├── raw/
+│   ├── processed/
+│   └── chroma/
 │
 ├── src/
-│   ├── ingestion/           # Data loading & Chroma build
-│   ├── services/            # Business logic services
-│   ├── planning/            # Learning plan engine
-│   ├── llm/                 # LLM integration (optional)
-│   ├── api/                 # FastAPI routes
-│   └── utils/               # Helpers
+│   ├── ingestion/
+│   ├── services/
+│   ├── planning/
+│   ├── llm/
+│   ├── api/
+│   └── utils/
 │
-├── app/                     # Streamlit UI
+├── app/
 ├── tests/
-├── requirements.txt
 └── README.md
 ```
 
@@ -96,10 +174,12 @@ ai-learning-path-assistant/
 
 ### 1. User Master
 
-* Portal ID (Primary Key)
+* Portal ID
 * Grade
 * Training Goal (hours/year)
-* Practice / Country
+* emp_practise
+
+---
 
 ### 2. Completion Data
 
@@ -107,37 +187,55 @@ ai-learning-path-assistant/
 * Course ID
 * Completion Status
 
+---
+
 ### 3. Course Master
 
 * Course ID
 * Course Name
-* Summary (contains prerequisites + duration)
+* Summary (unstructured)
 
 ---
 
-## 🔄 End-to-End Flow
+## 🔄 End-to-End Flow (UPDATED)
 
 ### Step 1: Input
 
 ```
-Portal ID + Target Expertise
+Portal ID + Target Expertise (optional)
 ```
 
 ---
 
 ### Step 2: Fetch User
 
-* Get employee profile
-* Extract:
-
-  * grade
-  * training goal
+* grade
+* training goal
+* **emp_practise**
 
 ---
 
-### Step 3: Fetch Completed Courses
+### Step 3: Map Practice → Skills 🔥
 
-* Filter:
+Example:
+
+```
+Application Services → Java, Testing, Backend
+```
+
+---
+
+### Step 4: Retrieve Relevant Courses
+
+#### Using:
+
+* Practice-based skills
+* Target expertise
+* ChromaDB semantic search
+
+---
+
+### Step 5: Fetch Completed Courses
 
 ```
 Completion Status = completed
@@ -145,47 +243,25 @@ Completion Status = completed
 
 ---
 
-### Step 4: Retrieve Relevant Courses
-
-Two approaches:
-
-#### Option A (Rule-based)
-
-* Keyword match on course title/summary
-
-#### Option B (Recommended)
-
-* Use **ChromaDB semantic search**
-
-```
-Query: "Java developer courses"
-→ Retrieve top relevant courses
-```
-
----
-
-### Step 5: Extract Metadata from Summary
-
-From course summary extract:
-
-* prerequisites
-* intended audience
-* duration (hours)
-
----
-
 ### Step 6: Filter Courses
 
 Remove:
 
-* already completed courses
-* courses not suitable for employee grade
+* completed courses
+* irrelevant courses
 
 ---
 
-### Step 7: Resolve Prerequisites
+### Step 7: Extract Metadata
 
-Ensure order:
+From summary:
+
+* prerequisites
+* duration
+
+---
+
+### Step 8: Sequence Courses
 
 ```
 Prerequisite → Main Course
@@ -193,171 +269,60 @@ Prerequisite → Main Course
 
 ---
 
-### Step 8: Optimize for Training Hours
+### Step 9: Optimize by Training Hours
 
-* Target = Training Goal
-* Compute:
-
-  * completed hours
-  * remaining hours
-* Add courses until target is met
+* fill plan until goal reached
 
 ---
 
-### Step 9: Generate Final Plan
-
-Return:
-
-* ordered course list
-* course duration
-* total planned hours
-* remaining gap
-
----
-
-### Step 10 (Optional): LLM Explanation
-
-Generate:
-
-* reasoning for course selection
-* skill gap summary
+### Step 10: Generate Output
 
 ---
 
 ## 🧠 Core Components
 
----
+### Practice Mapper (NEW)
 
-### 1. Ingestion Pipeline
-
-#### Input:
-
-Excel files
-
-#### Output:
-
-* Pandas DataFrames
-* ChromaDB index (course master)
+* Converts practice → skills
+* Drives recommendation logic
 
 ---
 
-### 2. ChromaDB (Vector Store)
+### Learning Plan Engine
 
-Used for:
-
-* semantic search on course summaries
-
-Stored in:
-
-```
-data/chroma/learning_catalog_db/
-```
+* filtering
+* sequencing
+* hour optimization
 
 ---
 
-### 3. Learning Plan Engine
+### ChromaDB
 
-Responsibilities:
-
-* filter completed courses
-* resolve prerequisites
-* order courses
-* calculate hours
-
----
-
-### 4. API Layer (FastAPI)
-
-Endpoints:
-
-```
-POST /generate-plan
-GET /health
-```
-
----
-
-### 5. UI Layer (Streamlit)
-
-Features:
-
-* input portal ID
-* select expertise
-* display plan
-* show explanation
+* semantic retrieval for course summaries
 
 ---
 
 ## ⚙️ Implementation Steps
 
----
+### Phase 1–3
 
-### Phase 1: Setup
-
-* Create repo structure
-* Install dependencies:
-
-```
-pip install pandas chromadb openpyxl fastapi streamlit
-```
+(same as before)
 
 ---
 
-### Phase 2: Data Ingestion
+### Phase 4 (UPDATED)
 
-* Load Excel into DataFrames
-* Clean missing values
-* Store processed CSVs
+Add:
 
----
-
-### Phase 3: Build ChromaDB
-
-* Convert course rows → documents
-* Embed summaries
-* Store in Chroma
+* practice_skill_mapper
 
 ---
 
-### Phase 4: Backend Services
+### Phase 5 (UPDATED)
 
-Implement:
+Enhance logic:
 
-* user_service
-* completion_service
-* course_service
-* planning_engine
-
----
-
-### Phase 5: Learning Plan Logic
-
-Implement:
-
-* completed course filtering
-* prerequisite ordering
-* duration calculation
-
----
-
-### Phase 6: API Layer
-
-* Create FastAPI endpoints
-* Integrate services
-
----
-
-### Phase 7: UI
-
-* Build Streamlit interface
-* Connect to backend API
-
----
-
-### Phase 8: LLM Integration (Optional)
-
-* Explanation generation
-* Skill gap summary
+* skill-based filtering
 
 ---
 
@@ -366,22 +331,14 @@ Implement:
 ```json
 {
   "portal_id": 24463,
-  "employee_name": "Shefali Joisa",
-  "training_goal_hours": 16,
-  "completed_hours": 4,
-  "remaining_hours": 12,
+  "practice": "Application Services",
+  "skills": ["java", "backend", "testing"],
   "recommended_courses": [
     {
-      "course_name": "JAXP",
-      "hours": 3
-    },
-    {
-      "course_name": "Effective Java",
-      "hours": 4
+      "course_name": "Java Threads",
+      "reason": "Matches Java backend skill"
     }
-  ],
-  "total_planned_hours": 7,
-  "gap_after_plan": 5
+  ]
 }
 ```
 
@@ -389,44 +346,37 @@ Implement:
 
 ## 🚀 Optional Enhancements
 
-* LLM-based prerequisite extraction
-* Skill gap analysis
-* Conversational interface
-* Recommendation scoring
-* Course clustering
+* LLM skill extraction
+* semantic prerequisite parsing
+* conversational assistant
 
 ---
 
 ## ⚠️ Design Considerations
 
-* Do NOT use L1–L6 for learning logic
-* Use summary carefully (noise vs signal)
-* Handle missing duration gracefully
-* Ensure deterministic core logic
+* Do NOT use L1–L6
+* Practice mapping is critical
+* summary parsing is noisy
+* combine rule + semantic
 
 ---
 
-## 🎯 Final Positioning
+## 🎯 Final Positioning (UPDATED)
 
-> AI-powered learning path assistant that combines structured employee data, unstructured course metadata, and intelligent planning logic to generate personalized, prerequisite-aware, and goal-driven learning plans.
-
----
-
-## ✅ Success Criteria
-
-* Correct filtering of completed courses
-* Logical course sequencing
-* Training goal alignment
-* Clean API + UI integration
-* Optional AI explanation layer
+> Built an intelligent learning path assistant leveraging practice-based skill mapping, course metadata, and completion history to generate personalized, prerequisite-aware, and training-goal-aligned learning plans.
 
 ---
 
-## 🔥 Future Scope
+## 🔥 Key Takeaway
 
-* Multi-skill recommendation
-* Integration with LMS
-* Reinforcement learning feedback loop
-* Personalized difficulty adjustment
+👉 Practice → Skill mapping is the **core intelligence layer**
+
+Without it:
+
+* generic output
+
+With it:
+
+* personalized, domain-aware system
 
 ---
