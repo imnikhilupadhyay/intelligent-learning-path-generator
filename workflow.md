@@ -1,515 +1,1468 @@
+
 # AI Learning Path Assistant
 
-## 📌 Overview
+## 1. Purpose
 
-This project builds an **intelligent learning path generation system** that creates personalized course plans for employees based on:
+AI Learning Path Assistant is a hybrid recommendation system that generates personalized learning plans for employees using:
 
-* Employee profile (grade, practice, training goal)
-* Completed courses
-* Course metadata (summary, prerequisites, duration)
-* Target expertise (e.g., Java, Data Engineering)
-* **Practice → Skill mapping**
+- structured employee data from the user master table
+- course completion history from the completion table
+- unstructured course metadata from the course master table
+- practice-to-skill mapping
+- lightweight semantic retrieval using ChromaDB
+- optional LLM-based explanation and metadata extraction
+- RAG evaluation using RAGAS for the retrieval/explanation layer
 
-The system combines:
+This project is designed for the capstone use case where the system must generate a learning plan for an employee based on their profile, annual training target, completed courses, and role context.
 
-* **Rule-based planning (deterministic core)**
-* **Semantic search (ChromaDB)**
-* **Practice-aware recommendation engine**
-* **Optional LLM reasoning (GenAI enhancement)**
+This is **not** a full chatbot system and **not** a pure RAG application.
 
----
+It is a **hybrid planning system** where:
 
-## 🎯 Objectives
-
-* Generate **personalized learning plans**
-* Remove **already completed courses**
-* Maintain **prerequisite order**
-* Optimize plan based on **annual training hours**
-* Use **practice-based skills for relevance**
-* Provide **explanations using LLM (optional)**
+- deterministic business logic is the backbone
+- semantic retrieval is a supporting layer
+- optional LLM reasoning improves explainability and extraction
+- evaluation covers both business logic quality and RAG quality separately
 
 ---
 
-## 🧠 Practice → Skill Mapping (CORE INTELLIGENCE LAYER)
+## 2. Business Problem
 
-### 📌 Why this is needed
+Employees have:
 
-The `user_master` table contains:
+- a profile in the user master table
+- a set of completed courses
+- an annual training goal in hours
+- a practice such as Application Services, BPS, Cloud & Security, or Global Support
 
-* `emp_practise`
+The raw data has these limitations:
 
-But it does NOT directly define:
+- `emp_practise` does not directly specify the employee’s primary skills
+- course summaries are partly unstructured
+- prerequisite and duration information may be hidden inside summary text
+- employees should not be recommended courses already completed
+- recommendations should align with annual training target hours
+- recommendations should align with the employee’s practice and optional target expertise
 
-* primary technical or functional skills
-* course recommendations
-
-This layer bridges that gap by mapping employee practice to skill themes and then to relevant courses.
-
----
-
-### 🔷 Practice Mapping
-
-#### 🟦 1. Application Services
-
-**Primary Skills:**
-
-* Programming & Development
-* Testing & QA
-* Software Architecture
-* UI / Frontend / Backend
-
-**Relevant Technologies / Skills:**
-
-* Java, .NET, Python, PHP
-* Spring, Hibernate, ASP.NET
-* Design Patterns, OOP
-* Selenium, QTP
-* HTML5, Angular, Node.js
-
-**Example Course Mapping:**
-
-* Java Threads
-* Spring MVC Module
-* Selenium - Multiple modules
-* Introduction to Selenium Basics
+The project solves this by generating a personalized, relevant, prerequisite-aware learning plan with hour tracking and optional natural-language explanation.
 
 ---
 
-#### 🟩 2. BPS (Business Process Services)
+## 3. Core Objectives
 
-**Primary Skills:**
+The system must:
 
-* Business Communication
-* Process & Operations
-* Domain Knowledge
-* Project Coordination
-
-**Relevant Topics:**
-
-* Business English
-* Communication Workshop
-* Banking Basics
-* Process / Quality
-
-**Example Course Mapping:**
-
-* Business English
-* Communication Workshop
-* Banking Basics
-* BPS_Process Training - Project
+1. Accept an employee identifier (`Portal ID`)
+2. Read employee metadata from the user master table
+3. Read completed courses from the completion table
+4. Retrieve relevant courses from the course master table
+5. Use practice-to-skill mapping to improve relevance
+6. Remove already completed courses
+7. Resolve prerequisite order where possible
+8. Estimate and accumulate course duration
+9. Align recommendations with the employee’s training goal
+10. Return a final learning plan with reasons
+11. Evaluate the RAG layer with RAGAS
+12. Evaluate the deterministic planner with business metrics
 
 ---
 
-#### 🟨 3. Cloud & Security
+## 4. Data Sources and Correct Interpretation
 
-**Primary Skills:**
+### 4.1 User Master Table
 
-* Cloud Platforms
-* Infrastructure & Networking
-* Cybersecurity
-* DevOps / Automation
+Important fields:
 
-**Relevant Topics:**
+- `Portal ID` → unique employee identifier
+- `grade` → employee grade
+- `Training Goal` → annual target learning hours
+- `emp_practise` → employee business practice
+- `employee_type`, `country`, and other fields can be used if needed
 
-* ITIL
-* Security Policies
-* Cisco Networking
-* DevOps
+Important clarifications:
 
-**Example Course Mapping:**
+- `Training Goal` means the number of hours the employee is expected to complete in a year
+- `L1` to `L6` are organizational hierarchy fields, not learning-path levels
+- `emp_practise` is useful context, but it does not directly define exact skills or direct course mappings
 
-* Information Security Management system
-* Cisco Firewall
-* ITIL Concepts
-* Cloud Security Awareness Training
+### 4.2 Completion Data Table
 
----
+Important fields:
 
-#### 🟪 4. Global Support
+- `Course ID`
+- `Portal ID`
+- `Enrolment Date`
+- `Completion Status`
+- `Completed Date`
 
-**Primary Skills:**
+Important business rule:
 
-* IT Service Desk / Support Operations
-* Incident, Problem, Change, and Request Management
-* Customer / Client Communication
-* Service Management Tools
-* Security & Compliance Awareness
-* Support Process Governance
-
-**Relevant Topics:**
-
-* Service Desk fundamentals and intermediate support
-* Incident and problem management
-* ServiceNow / service management platforms
-* Customer service and complaint handling
-* Information security, GDPR, and compliance
-* Support operations for infrastructure / production environments
-
-**Best-Suited Course Examples from Current Course List:**
-
-* IT Service Desk Fundamental (Grade 4)
-* IT Service Desk Fundamental (Grade 5)
-* IT Service Desk Intermediate (Grade 6)
-* Service Desk - Future Training Force Certification
-* ServiceNow Fundamentals
-* Servicenow- Incident Handling
-* IT Service Management Incident vs Service Request - NanoLearning
-* IT Service Management Major Incident Priority Downgrade Policy
-* SOM Intro and Incident Management (Distance Learning)
-* SOM Problem Management (Distance Learning)
-* SOM Change Management (Distance Learning)
-* SOM Service Request Management (Distance Learning)
-* Information Security Management System Training (DS)
-* Information Security for Work and Home
-* GDPR General Data Protection Regulation
-* Cloud Security Awareness Training
-* The Fundamentals of Exceptional Customer Service
-* The Customer's Voice
-* Workshop - Handling Client Complaints
-* Communicating with client
-
----
-
-### 🧩 Implementation
-
-```python
-PRACTICE_SKILL_MAP = {
-    "Application Services": [
-        "java", "python", ".net", "programming", "testing",
-        "backend", "frontend", "architecture", "design patterns",
-        "spring", "hibernate", "selenium", "node.js", "html5"
-    ],
-    "BPS": [
-        "communication", "business", "process", "domain",
-        "coordination", "banking", "healthcare", "insurance",
-        "writing", "etiquette", "customer service"
-    ],
-    "Cloud & Security": [
-        "cloud", "networking", "security", "devops",
-        "infrastructure", "firewall", "gdpr", "itil",
-        "compliance", "cybersecurity"
-    ],
-    "Global Support": [
-        "service desk", "incident management", "problem management",
-        "change management", "service request", "servicenow",
-        "it service management", "customer service", "client communication",
-        "support operations", "security awareness", "gdpr", "compliance"
-    ]
-}
-```
-
----
-
-## 🧱 High-Level Architecture
-
-```text
-                ┌────────────────────┐
-                │   Streamlit UI     │
-                └─────────┬──────────┘
-                          │ API Call
-                          ▼
-                ┌────────────────────┐
-                │   FastAPI Backend  │
-                │ (Core Orchestrator)│
-                └─────────┬──────────┘
-                          │
-        ┌─────────────────┼──────────────────┐
-        ▼                 ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌────────────────────┐
-│ User Service │  │ Completion   │  │ Course Service     │
-│ (Pandas)     │  │ Service      │  │ + ChromaDB         │
-└──────────────┘  └──────────────┘  └────────────────────┘
-        │
-        ▼
-┌────────────────────────────┐
-│ Practice → Skill Mapper    │
-└────────────┬───────────────┘
-             ▼
-      ┌───────────────────────┐
-      │ Learning Plan Engine  │
-      │ - Filter completed    │
-      │ - Resolve prereq      │
-      │ - Optimize hours      │
-      │ - Rank by practice fit│
-      └────────────┬──────────┘
-                   ▼
-         ┌────────────────────┐
-         │ LLM (Optional)     │
-         │ Explanation Layer  │
-         └────────────────────┘
-                   ▼
-            Final Response
-```
-
----
-
-## 📂 Project Structure
-
-```text
-ai-learning-path-assistant/
-│
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── chroma/
-│
-├── src/
-│   ├── ingestion/
-│   ├── services/
-│   ├── planning/
-│   ├── llm/
-│   ├── api/
-│   └── utils/
-│
-├── app/
-├── tests/
-└── README.md
-```
-
----
-
-## 📊 Data Sources
-
-### 1. User Master
-
-* Portal ID
-* Grade
-* Training Goal (hours/year)
-* emp_practise
-
-### 2. Completion Data
-
-* Portal ID
-* Course ID
-* Completion Status
-
-### 3. Course Master
-
-* Course ID
-* Course Name
-* Summary (unstructured)
-
----
-
-## 🔄 End-to-End Flow
-
-### Step 1: Input
-
-```text
-Portal ID + Target Expertise (optional)
-```
-
-### Step 2: Fetch User
-
-Extract:
-
-* grade
-* training goal
-* emp_practise
-
-### Step 3: Map Practice → Skills
-
-Example:
-
-```text
-Global Support → service desk, incident management, ServiceNow, customer service, security awareness
-```
-
-### Step 4: Retrieve Relevant Courses
-
-Use:
-
-* practice-based skill keywords
-* optional target expertise
-* ChromaDB semantic search over course names and summaries
-
-### Step 5: Fetch Completed Courses
+A course is considered completed only if:
 
 ```text
 Completion Status = completed
 ```
 
-### Step 6: Filter Courses
+This table is used to:
 
-Remove:
+- identify completed courses
+- exclude completed courses from recommendation
+- optionally calculate completed hours if course duration is available
 
-* completed courses
-* low-relevance courses
-* courses not suitable for grade, if grade rules are available
+### 4.3 Course Master Table
 
-### Step 7: Extract Metadata
+Important fields:
 
-From summary:
+- `Course ID`
+- `Course Full Name`
+- `summary`
 
-* prerequisites
-* intended audience
-* duration
+The `summary` may contain:
 
-### Step 8: Sequence Courses
+- prerequisite information
+- intended audience
+- grade or suitability hints
+- duration
+- learning objectives
+- topic or technology keywords
+
+This table is the main source for:
+
+- course relevance
+- semantic retrieval
+- prerequisite extraction
+- duration extraction
+- suitability hints
+
+---
+
+## 5. Project Type and Technical Positioning
+
+This project is best described as a:
+
+- personalized learning path recommendation system
+- rule-based planning engine
+- lightweight RAG-assisted retrieval system
+- optional GenAI explanation and extraction layer
+
+### Deterministic Core
+
+Used for:
+
+- employee lookup
+- completion filtering
+- practice mapping
+- ranking
+- prerequisite ordering
+- hour optimization
+- plan assembly
+
+### Lightweight RAG Layer
+
+Used for:
+
+- semantic search over course names and summaries
+- retrieving best-fit courses for a practice or target expertise
+- grounding LLM explanations
+- helping extract prerequisite, duration, and audience details from summary text
+
+### Optional LLM Layer
+
+Used for:
+
+- explanation generation
+- skill-gap summary
+- metadata extraction from messy summaries
+- rationale generation for recommended courses
+
+---
+
+## 6. Practice-to-Skill Mapping Layer
+
+### 6.1 Why It Is Required
+
+The `user_master` table contains `emp_practise`, but it does not directly tell:
+
+- the primary skills for the employee
+- which courses should be considered relevant
+
+So the system introduces a knowledge layer:
 
 ```text
-Prerequisite → Main Course
+Practice → Skill Themes → Relevant Course Families
 ```
 
-### Step 9: Optimize by Training Hours
+This becomes the core recommendation context.
 
-* fill plan until annual target hours are met or closely matched
+### 6.2 Practice Mapping
 
-### Step 10: Generate Output
+#### A. Application Services
 
-Return:
+Primary skill themes:
 
-* recommended courses
-* durations
-* total planned hours
-* remaining gap
-* rationale
+- programming and development
+- backend engineering
+- frontend engineering
+- software architecture
+- testing and QA
+
+Typical technologies and keywords:
+
+- java
+- python
+- .net
+- php
+- spring
+- hibernate
+- asp.net
+- design patterns
+- oop
+- selenium
+- qtp
+- angular
+- node.js
+- html5
+
+Example course fit:
+
+- Java Threads
+- JAXP
+- Effective Java - General Coding Practices
+- Selenium-related courses
+- backend/frontend/application architecture courses
+
+#### B. BPS (Business Process Services)
+
+Primary skill themes:
+
+- communication
+- process and operations
+- business and domain understanding
+- project coordination
+- quality and documentation
+
+Typical keywords:
+
+- communication
+- process
+- banking
+- healthcare
+- insurance
+- quality
+- customer service
+- writing
+- etiquette
+
+Example course fit:
+
+- business english
+- communication workshop
+- banking basics
+- BPS process and quality courses
+
+#### C. Cloud & Security
+
+Primary skill themes:
+
+- cloud platforms
+- networking and infrastructure
+- cybersecurity
+- devops and automation
+- compliance and governance
+
+Typical keywords:
+
+- cloud
+- networking
+- security
+- firewall
+- gdpr
+- itil
+- devops
+- infrastructure
+- cybersecurity
+- compliance
+
+Example course fit:
+
+- Information Security Management System Training
+- Cloud Security Awareness Training
+- GDPR-related courses
+- Cisco/infrastructure/networking courses
+- AWS/Azure/cloud engineering courses
+
+#### D. Global Support
+
+Primary skill themes:
+
+- service desk and support operations
+- incident management
+- problem management
+- change management
+- service request handling
+- customer and client communication
+- service management tooling
+- security and compliance awareness
+
+Typical keywords:
+
+- service desk
+- incident management
+- problem management
+- change management
+- service request
+- servicenow
+- itil
+- support operations
+- customer service
+- client communication
+- gdpr
+- compliance
+- security awareness
+
+Best-suited example courses from the uploaded course list include:
+
+- IT Service Desk Fundamental (Grade 4)
+- IT Service Desk Fundamental (Grade 5)
+- IT Service Desk Intermediate (Grade 6)
+- Service Desk - Future Training Force Certification
+- ServiceNow Fundamentals
+- Servicenow- Incident Handling
+- IT Service Management Incident vs Service Request - NanoLearning
+- IT Service Management Major Incident Priority Downgrade Policy
+- SOM Intro and Incident Management (Distance Learning)
+- SOM Problem Management (Distance Learning)
+- SOM Change Management (Distance Learning)
+- SOM Service Request Management (Distance Learning)
+- SOM Knowledge Management E-Learning
+- Information Security Management System Training (DS)
+- Information Security for Work and Home
+- GDPR General Data Protection Regulation
+- Security and Compliance
+- Tenet Help Desk Training
+- Linux Production Support
+- MT Production Support
+- SitMan and CritSit Procedures
+- Service Desk Skill Enhancement Certifications - Level 1
+- Windows, Printers, Shares
+- Office 365
+
+### 6.3 Practice Mapping Configuration
+
+Store mapping in a config file, preferably:
+
+```text
+config/practice_skill_map.yaml
+```
+
+Example:
+
+```yaml
+Application Services:
+  skills:
+    - java
+    - python
+    - programming
+    - backend
+    - frontend
+    - testing
+    - architecture
+    - spring
+    - selenium
+
+BPS:
+  skills:
+    - communication
+    - process
+    - business
+    - domain
+    - quality
+    - customer service
+
+Cloud & Security:
+  skills:
+    - cloud
+    - networking
+    - security
+    - devops
+    - infrastructure
+    - gdpr
+    - compliance
+    - itil
+
+Global Support:
+  skills:
+    - service desk
+    - incident management
+    - problem management
+    - change management
+    - service request
+    - servicenow
+    - itil
+    - customer service
+    - client communication
+    - support operations
+    - gdpr
+    - compliance
+    - security awareness
+```
 
 ---
 
-## 🧠 Core Components
+## 7. Solution Architecture
 
-### Practice Mapper
+### 7.1 High-Level Architecture
 
-* Converts practice → skills
-* Drives recommendation logic
-* Supports Application Services, BPS, Cloud & Security, and Global Support
+```text
+                ┌────────────────────────────┐
+                │       Streamlit UI         │
+                │   User-facing frontend     │
+                └─────────────┬──────────────┘
+                              │ HTTP
+                              ▼
+                ┌────────────────────────────┐
+                │       FastAPI Backend      │
+                │     Core Orchestrator      │
+                └─────────────┬──────────────┘
+                              │
+      ┌───────────────────────┼────────────────────────┐
+      ▼                       ▼                        ▼
+┌───────────────┐      ┌───────────────┐      ┌────────────────────┐
+│ User Service  │      │ Completion    │      │ Course Service     │
+│ (Pandas)      │      │ Service       │      │ (Pandas + Chroma)  │
+└──────┬────────┘      └──────┬────────┘      └──────────┬─────────┘
+       │                      │                          │
+       └──────────────┬───────┴───────────────┬──────────┘
+                      ▼                       ▼
+            ┌──────────────────────┐   ┌──────────────────────┐
+            │ Practice Skill Mapper│   │ Summary Parser       │
+            │ Context Layer        │   │ Duration / Prereq    │
+            └────────────┬─────────┘   └────────────┬─────────┘
+                         └──────────────┬───────────┘
+                                        ▼
+                          ┌──────────────────────────┐
+                          │ Learning Plan Engine     │
+                          │ - relevance ranking      │
+                          │ - completion filtering   │
+                          │ - prerequisite ordering  │
+                          │ - hour optimization      │
+                          └────────────┬─────────────┘
+                                       ▼
+                        ┌──────────────────────────────┐
+                        │ Optional LLM Explanation     │
+                        │ and/or Field Extraction      │
+                        └────────────┬─────────────────┘
+                                     ▼
+                          ┌──────────────────────────┐
+                          │ Final Response Payload   │
+                          └──────────────────────────┘
+```
 
-### Learning Plan Engine
+### 7.2 Architecture Principles
 
-* filtering
-* sequencing
-* hour optimization
-* relevance ranking by practice fit
-
-### ChromaDB
-
-* semantic retrieval for course summaries and titles
-
----
-
-## ⚙️ Implementation Steps
-
-### Phase 1: Setup
-
-* Create repo structure
-* Install dependencies
-
-### Phase 2: Data Ingestion
-
-* Load Excel into DataFrames
-* Clean missing values
-* Store processed CSVs
-
-### Phase 3: Build ChromaDB
-
-* Convert course rows into documents
-* Embed summaries
-* Store in Chroma
-
-### Phase 4: Backend Services
-
-Implement:
-
-* `user_service`
-* `completion_service`
-* `course_service`
-* `practice_skill_mapper`
-* `planning_engine`
-
-### Phase 5: Learning Plan Logic
-
-Implement:
-
-* completed course filtering
-* practice-based skill filtering
-* prerequisite ordering
-* duration calculation
-* hour optimization
-
-### Phase 6: API Layer
-
-* Create FastAPI endpoints
-* Integrate services
-
-### Phase 7: UI
-
-* Build Streamlit interface
-* Connect to backend API
-
-### Phase 8: LLM Integration (Optional)
-
-* explanation generation
-* skill gap summary
-* reasoning for recommended courses
+1. Deterministic planning first
+2. RAG as support, not backbone
+3. UI and backend separated
+4. Practice mapping config-driven
+5. Explainability included
+6. Evaluation included for both rule engine and RAG
 
 ---
 
-## 📊 Sample Output
+## 8. Project Structure
+
+```text
+ai-learning-path-assistant/
+│
+├── app/
+│   └── streamlit_app.py
+│
+├── config/
+│   ├── practice_skill_map.yaml
+│   ├── retrieval_config.yaml
+│   └── parser_config.yaml
+│
+├── data/
+│   ├── raw/
+│   │   ├── user_master.xlsx
+│   │   ├── completion_data.xlsx
+│   │   └── course_master.xlsx
+│   │
+│   ├── processed/
+│   │   ├── user_master.csv
+│   │   ├── completion_data.csv
+│   │   ├── course_master.csv
+│   │   └── course_master_enriched.csv
+│   │
+│   └── chroma/
+│       └── learning_catalog_db/
+│
+├── src/
+│   ├── api/
+│   │   ├── main.py
+│   │   ├── routes.py
+│   │   └── schemas.py
+│   │
+│   ├── ingestion/
+│   │   ├── load_excel.py
+│   │   ├── preprocess_data.py
+│   │   ├── build_chroma.py
+│   │   └── enrich_course_master.py
+│   │
+│   ├── services/
+│   │   ├── user_service.py
+│   │   ├── completion_service.py
+│   │   ├── course_service.py
+│   │   ├── retrieval_service.py
+│   │   ├── practice_mapper.py
+│   │   └── explanation_service.py
+│   │
+│   ├── planning/
+│   │   ├── ranking_engine.py
+│   │   ├── prerequisite_resolver.py
+│   │   ├── duration_estimator.py
+│   │   ├── hour_optimizer.py
+│   │   └── plan_builder.py
+│   │
+│   ├── llm/
+│   │   ├── prompts.py
+│   │   ├── llm_client.py
+│   │   └── metadata_extractor.py
+│   │
+│   ├── evaluation/
+│   │   ├── evaluate_rule_engine.py
+│   │   ├── evaluate_rag.py
+│   │   ├── ragas_runner.py
+│   │   └── datasets/
+│   │
+│   └── utils/
+│       ├── logging_utils.py
+│       ├── text_utils.py
+│       ├── file_utils.py
+│       └── constants.py
+│
+├── tests/
+│   ├── test_user_service.py
+│   ├── test_completion_service.py
+│   ├── test_practice_mapper.py
+│   ├── test_retrieval_service.py
+│   ├── test_duration_estimator.py
+│   ├── test_prerequisite_resolver.py
+│   └── test_plan_builder.py
+│
+├── notebooks/
+│   └── eda.ipynb
+│
+├── requirements.txt
+├── README.md
+└── .env.example
+```
+
+---
+
+## 9. End-to-End Functional Flow
+
+### Step 1. User submits request
+
+Input fields:
+
+- `portal_id`
+- optional `target_expertise`
+- optional `top_k`
+- optional `include_explanation`
+
+Example:
 
 ```json
 {
   "portal_id": 24463,
-  "practice": "Global Support",
-  "skills": [
-    "service desk",
-    "incident management",
-    "servicenow",
-    "customer service",
-    "security awareness"
+  "target_expertise": "Java",
+  "include_explanation": true,
+  "top_k": 15
+}
+```
+
+### Step 2. Fetch employee profile
+
+From user master:
+
+- portal id
+- grade
+- training goal
+- emp_practise
+
+Validation:
+
+- portal id exists
+- training goal numeric where possible
+- emp_practise normalized
+
+### Step 3. Build employee context
+
+Context assembled from:
+
+- practice
+- optional target expertise
+- grade
+- possibly employee type and country if needed later
+
+### Step 4. Map practice to skill themes
+
+Example:
+
+```text
+Global Support
+→ service desk
+→ incident management
+→ servicenow
+→ support operations
+→ customer service
+→ compliance
+```
+
+If target expertise is present, merge it with practice keywords.
+
+### Step 5. Retrieve candidate courses
+
+Use hybrid retrieval:
+
+#### A. Rule-based retrieval
+- title keyword match
+- summary keyword match
+- exact phrase match against practice skills
+
+#### B. Semantic retrieval using ChromaDB
+Example query:
+
+```text
+Global Support service desk incident management servicenow support operations
+```
+
+Retrieve top-k candidate courses.
+
+#### C. Merge and deduplicate
+Combine keyword and semantic results.
+
+### Step 6. Fetch completed courses
+
+From completion data, filter:
+
+```text
+Portal ID = given employee
+Completion Status = completed
+```
+
+### Step 7. Parse course metadata
+
+Extract from summary if possible:
+
+- duration
+- prerequisite text
+- intended audience
+- grade suitability
+- topic hints
+
+Use regex parser first.  
+Use optional LLM extraction if parsing confidence is low.
+
+Persist enriched data in:
+
+```text
+data/processed/course_master_enriched.csv
+```
+
+### Step 8. Filter candidate courses
+
+Remove:
+
+- completed courses
+- duplicates
+- invalid records
+- low relevance entries
+- grade-incompatible courses if reliable grade rules exist
+
+### Step 9. Score and rank candidates
+
+Suggested weighted score:
+
+```text
+final_score =
+    0.35 * practice_match_score +
+    0.25 * semantic_similarity_score +
+    0.15 * expertise_match_score +
+    0.10 * grade_fit_score +
+    0.10 * prerequisite_readiness_score +
+    0.05 * support_bonus_score
+```
+
+### Step 10. Resolve prerequisites
+
+If a prerequisite is found:
+
+- try to map prerequisite text to an existing course
+- if mapped and not completed, insert it before the dependent course
+- if not mapped, keep it as advisory note
+
+### Step 11. Optimize against annual target hours
+
+Compute:
+
+- annual target hours
+- completed hours if known
+- remaining target hours
+- planned hours
+
+Selection rules:
+
+- prioritize highest-ranked relevant courses
+- maintain prerequisite order
+- stop when target is met or closely approached
+- avoid excessive overshoot unless explicitly allowed
+
+### Step 12. Generate explanation
+
+Optional LLM explanation should state:
+
+- why the course was recommended
+- how it aligns with practice or expertise
+- whether it supports prerequisite progression
+- how it contributes to target hours
+
+### Step 13. Return final response
+
+Include:
+
+- employee context
+- completed courses
+- recommended courses
+- duration totals
+- remaining gap
+- rationale
+- warnings if parsing or duration is uncertain
+
+---
+
+## 10. Recommendation Logic Details
+
+### 10.1 Recommendation Priority
+
+1. completed-course exclusion
+2. practice relevance
+3. target expertise relevance
+4. prerequisite correctness
+5. hour alignment
+6. grade suitability
+7. explanation quality
+
+### 10.2 Handling Optional Target Expertise
+
+If target expertise is supplied:
+
+- it should boost relevant courses
+- it should not fully override practice unless required by business rule
+
+Examples:
+
+- Application Services + Java
+- Global Support + ServiceNow
+- Cloud & Security + AWS
+- BPS + Communication
+
+### 10.3 Practice-Specific Preference Rules
+
+#### Application Services
+Prefer development, testing, architecture, frontend/backend.
+
+#### BPS
+Prefer communication, process, business/domain, quality.
+
+#### Cloud & Security
+Prefer cloud, network, security, compliance, devops.
+
+#### Global Support
+Prefer service desk, incident handling, ServiceNow, support operations, customer service, compliance.
+
+---
+
+## 11. Lightweight RAG Design
+
+### 11.1 Why RAG Is Used
+
+Course summaries are unstructured. Keyword-only retrieval may miss good matches.  
+So lightweight RAG is used for:
+
+- semantic course retrieval
+- explanation grounding
+- supporting metadata extraction
+
+### 11.2 What RAG Does Not Do
+
+RAG does not decide:
+
+- which completed courses to exclude
+- final hour optimization
+- deterministic prerequisite ordering on its own
+
+Those remain rule-based.
+
+### 11.3 ChromaDB Design
+
+Use a persistent Chroma collection such as:
+
+- `course_master_collection`
+
+Suggested document:
+
+```text
+Course ID: 118
+Course Full Name: Java Threads
+Summary: A thread is a single sequential flow...
+Parsed Topics: java, threads, multitasking
+Parsed Audience: grade 5 and above
+Parsed Prerequisite: Java Application Deployment
+Parsed Duration Hours: 2
+```
+
+Suggested metadata:
+
+```json
+{
+  "course_id": "118",
+  "course_name": "Java Threads",
+  "topics": ["java", "threads", "backend"],
+  "source": "course_master"
+}
+```
+
+### 11.4 Retrieval Flow
+
+1. build query from practice skills + target expertise
+2. query Chroma
+3. fetch top-k semantic matches
+4. merge with keyword matches
+5. deduplicate and score
+
+---
+
+## 12. RAGAS and Evaluation Plan
+
+### 12.1 Evaluation Tracks
+
+There are two evaluation tracks:
+
+1. rule-engine metrics
+2. RAG metrics using RAGAS
+
+### 12.2 Rule-Engine Metrics
+
+#### A. Completed Course Exclusion Accuracy
+Whether completed courses are correctly excluded.
+
+#### B. Prerequisite Ordering Accuracy
+Whether prerequisite courses appear before dependent courses.
+
+#### C. Training Goal Coverage
+
+```text
+planned_hours / target_hours
+```
+
+#### D. Practice Relevance Score
+Whether final recommendations align with mapped practice skills.
+
+#### E. Recommendation Precision
+Relevant recommendations divided by total recommendations.
+
+#### F. Duplicate Recommendation Rate
+How often duplicates or near-duplicates appear.
+
+### 12.3 RAGAS Metrics
+
+Use RAGAS for the retrieval/explanation layer only.
+
+#### A. Faithfulness
+Whether generated explanation is grounded in retrieved course context.
+
+#### B. Answer Relevancy
+Whether the answer/explanation addresses the query.
+
+#### C. Context Precision
+Whether retrieved context is relevant.
+
+#### D. Context Recall
+Whether the retrieval captured enough useful context.
+
+### 12.4 Example RAG Evaluation Queries
+
+- What courses are most relevant for Global Support?
+- Why was ServiceNow Fundamentals recommended?
+- What is the prerequisite for Java Threads?
+- Which courses are suitable for Application Services and Java?
+
+Example evaluation record:
+
+```json
+{
+  "question": "What courses are relevant for Global Support?",
+  "ground_truth": "Service desk, incident management, ServiceNow, compliance, and support operations courses are relevant.",
+  "contexts": [
+    "IT Service Desk Fundamental...",
+    "ServiceNow Fundamentals...",
+    "SOM Intro and Incident Management..."
+  ],
+  "answer": "Recommended courses include IT Service Desk Fundamental and ServiceNow Fundamentals because they align with service desk operations, incident handling, and support workflows."
+}
+```
+
+### 12.5 Retrieval Strategy Comparison
+
+Compare:
+
+- keyword-only retrieval
+- semantic retrieval only
+- hybrid retrieval
+- hybrid retrieval plus practice mapping
+
+---
+
+## 13. Detailed Module Responsibilities
+
+### 13.1 user_service.py
+
+Responsibilities:
+
+- load user master
+- fetch employee by portal id
+- normalize practice
+- validate training goal
+
+### 13.2 completion_service.py
+
+Responsibilities:
+
+- load completion table
+- fetch completed courses by portal id
+- return course ids and statuses
+
+### 13.3 course_service.py
+
+Responsibilities:
+
+- load course master
+- fetch course by id
+- search by title or keywords
+- load enriched course fields
+
+### 13.4 practice_mapper.py
+
+Responsibilities:
+
+- load practice mapping config
+- return skill list for a practice
+- handle aliases and normalization
+
+### 13.5 retrieval_service.py
+
+Responsibilities:
+
+- construct retrieval query
+- query ChromaDB
+- combine keyword and semantic matches
+- deduplicate candidates
+
+### 13.6 duration_estimator.py
+
+Responsibilities:
+
+- parse duration from summary text
+- estimate fallback if missing
+
+Suggested regex patterns:
+
+- `(\d+)\s*hours?`
+- `duration\s*[:\-]?\s*(\d+)`
+- `(\d+)\s*hr`
+
+### 13.7 prerequisite_resolver.py
+
+Responsibilities:
+
+- parse prerequisite text
+- map text to course candidates where possible
+- build prerequisite ordering
+
+### 13.8 ranking_engine.py
+
+Responsibilities:
+
+- compute relevance score
+- combine practice, expertise, semantic similarity, grade, readiness
+
+### 13.9 hour_optimizer.py
+
+Responsibilities:
+
+- pick best ordered recommendations
+- align with target hours
+- manage overshoot logic
+
+### 13.10 plan_builder.py
+
+Responsibilities:
+
+- assemble final response
+- attach reasons and notes
+- format plan output
+
+### 13.11 explanation_service.py
+
+Responsibilities:
+
+- call optional LLM
+- create concise grounded explanation
+- avoid unsupported claims
+
+---
+
+## 14. API Design
+
+### 14.1 Health Endpoint
+
+```http
+GET /health
+```
+
+Response:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### 14.2 Generate Plan Endpoint
+
+```http
+POST /generate-plan
+```
+
+Request example:
+
+```json
+{
+  "portal_id": 24463,
+  "target_expertise": "Java",
+  "include_explanation": true,
+  "top_k": 15
+}
+```
+
+Response example:
+
+```json
+{
+  "portal_id": 24463,
+  "employee_name": "Shefali Joisa",
+  "grade": 13,
+  "practice": "Application Services",
+  "target_expertise": "Java",
+  "annual_training_goal_hours": 16,
+  "completed_course_ids": [118],
+  "completed_hours": 2,
+  "remaining_target_hours": 14,
+  "skills_used_for_retrieval": [
+    "java",
+    "backend",
+    "programming",
+    "testing"
   ],
   "recommended_courses": [
     {
-      "course_name": "IT Service Desk Fundamental (Grade 4)",
-      "reason": "Strong match for foundational support operations"
+      "course_id": 119,
+      "course_name": "JAXP",
+      "hours": 3,
+      "prerequisite": "Knowledge of Java Application Deployment",
+      "reason": "Matches Java skill theme and is relevant for application development."
     },
     {
-      "course_name": "ServiceNow Fundamentals",
-      "reason": "Supports service management platform skills"
-    },
-    {
-      "course_name": "SOM Intro and Incident Management (Distance Learning)",
-      "reason": "Relevant for incident handling workflows"
+      "course_id": 120,
+      "course_name": "Effective Java - General Coding Practices",
+      "hours": 4,
+      "prerequisite": null,
+      "reason": "Improves coding practices for Java developers."
     }
-  ]
+  ],
+  "planned_hours": 7,
+  "remaining_gap_after_plan": 7,
+  "explanation": "These recommendations align with Application Services and focus on Java development fundamentals and coding quality."
 }
 ```
 
 ---
 
-## 🚀 Optional Enhancements
+## 15. Streamlit UI Requirements
 
-* LLM-based prerequisite extraction
-* LLM-based skill extraction from course summaries
-* conversational assistant
-* recommendation scoring
-* feedback-based ranking
+The UI should support:
+
+- input field for Portal ID
+- optional input for Target Expertise
+- checkbox for Include Explanation
+- button to Generate Plan
+
+The UI should display:
+
+- employee metadata
+- training goal
+- completed courses
+- recommended courses
+- hours per course
+- total planned hours
+- remaining gap
+- optional explanation
+
+Optional advanced UI:
+
+- show retrieved candidate courses
+- show filtered-out completed courses
+- show ranking explanation
+- show notes for unknown duration or unmapped prerequisites
+
+---
+
+## 16. Ingestion and Data Preparation Pipeline
+
+### Step 1. Load Excel Files
+
+Read:
+
+- user master
+- completion data
+- course master
+
+### Step 2. Clean Columns
+
+- trim whitespace
+- standardize column names
+- normalize practice values
+- preserve raw summary
+- create lowercase summary copy for keyword processing
+
+### Step 3. Persist Processed CSVs
+
+Save cleaned datasets in:
+
+```text
+data/processed/
+```
+
+### Step 4. Enrich Course Master
+
+Add parsed columns such as:
+
+- `parsed_topics`
+- `parsed_duration_hours`
+- `parsed_prerequisite_text`
+- `parsed_grade_hint`
+- `parsed_audience_text`
+
+### Step 5. Build ChromaDB
+
+Convert each course to a retrieval document and persist in:
+
+```text
+data/chroma/learning_catalog_db/
+```
 
 ---
 
-## ⚠️ Design Considerations
+## 17. Build Roadmap
 
-* Do NOT use L1–L6 for learning logic
-* Practice mapping is critical
-* Combine keyword matching with semantic retrieval
-* Handle missing duration gracefully
-* Keep core recommendation logic deterministic
+### Phase 1. Repo and Config Setup
+
+- create directory structure
+- create requirements file
+- create config YAML files
+- create `.env.example`
+
+### Phase 2. Data Ingestion
+
+- load excel
+- preprocess and clean
+- export processed CSVs
+- enrich course master
+
+### Phase 3. Retrieval Layer
+
+- build Chroma collection
+- implement keyword retrieval
+- implement semantic retrieval
+- merge into hybrid retrieval
+
+### Phase 4. Core Services
+
+- user service
+- completion service
+- course service
+- practice mapper
+
+### Phase 5. Planning Engine
+
+- scoring/ranking
+- prerequisite resolution
+- duration parsing
+- hour optimization
+- plan assembly
+
+### Phase 6. API Layer
+
+- create FastAPI app
+- define schemas
+- add routes
+- health endpoint
+- generate-plan endpoint
+
+### Phase 7. UI Layer
+
+- build Streamlit form
+- connect to API
+- render plan and explanation
+
+### Phase 8. Optional LLM Layer
+
+- explanation prompt
+- metadata extraction prompt
+- JSON output enforcement
+- fallback to deterministic parser
+
+### Phase 9. Evaluation
+
+- business metrics runner
+- RAGAS runner
+- retrieval strategy comparison
+
+### Phase 10. Packaging
+
+- finalize README
+- add screenshots
+- add examples
+- add tests
+- prepare demo scenarios
 
 ---
 
-## 🎯 Final Positioning
+## 18. LLM Prompt Guidance
 
-> Built an intelligent learning path assistant leveraging practice-based skill mapping, course metadata, and completion history to generate personalized, prerequisite-aware, and training-goal-aligned learning plans.
+### 18.1 Explanation Prompt
+
+Use retrieved course text and employee context to explain:
+
+- why the course was recommended
+- how it aligns with the employee’s practice or target expertise
+- what capability it builds
+
+Rules:
+
+- stay grounded in provided course text
+- do not invent prerequisite information
+- do not invent duration if absent
+- use concise reasoning
+
+### 18.2 Metadata Extraction Prompt
+
+When parsing is uncertain, ask the LLM to extract:
+
+- prerequisite
+- duration
+- intended audience
+- grade suitability hints
+
+Rules:
+
+- return JSON only
+- use `null` when not found
+- do not guess
+
+Suggested output:
+
+```json
+{
+  "duration_hours": null,
+  "prerequisite": "Knowledge of Java Application Deployment",
+  "audience": "Developers of Grade 5 and above",
+  "grade_hint": "5+"
+}
+```
 
 ---
 
-## ✅ Success Criteria
+## 19. Error Handling and Fallbacks
 
-* Correct filtering of completed courses
-* Relevant recommendations based on practice
-* Logical sequencing of prerequisites
-* Training goal alignment
-* Clean API + UI integration
-* Optional AI explanation layer
+### A. Missing Portal ID
+Return business error:
+- employee not found
+
+### B. Missing Practice
+Fallback:
+- use target expertise if provided
+- otherwise use generic retrieval
+
+### C. Missing Duration
+Fallback:
+- estimate conservative duration
+- or mark duration as unknown
+
+### D. Unmapped Prerequisite
+Fallback:
+- keep prerequisite as advisory note
+
+### E. No Relevant Courses Found
+Fallback:
+- return empty plan
+- include reason
+- suggest broader expertise filter
+
+### F. Poor Summary Format
+Fallback:
+- rely more on title keywords
+- use semantic retrieval
+- skip unreliable fields
 
 ---
+
+## 20. Testing Strategy
+
+### Unit Tests
+
+Test:
+
+- practice mapping
+- completion filtering
+- duration parsing
+- prerequisite parsing
+- ranking logic
+- hour optimization
+
+### Integration Tests
+
+Test:
+
+- API end-to-end
+- Chroma retrieval integration
+- enrichment pipeline
+- explanation integration
+
+### Demo Scenarios
+
+- Application Services + Java
+- Global Support without target expertise
+- Global Support + ServiceNow
+- Cloud & Security + AWS
+- BPS + communication
+- employee with many completed courses
+- employee with zero completed courses
+
+---
+
+## 21. Success Criteria
+
+The project is successful if it can:
+
+1. correctly fetch employee context
+2. exclude completed courses
+3. recommend practice-relevant courses
+4. preserve prerequisite order where known
+5. align plan with annual target hours
+6. use semantic retrieval effectively for messy summaries
+7. optionally explain recommendations clearly
+8. report both rule-engine and RAG metrics
+
+---
+
+## 22. Final Positioning
+
+AI Learning Path Assistant is a hybrid recommendation engine that combines structured employee data, practice-aware skill mapping, course completion history, semantic retrieval over course metadata, and deterministic planning logic to generate personalized, prerequisite-aware, and training-goal-aligned learning plans.
+
+---
+
+## 23. Future Enhancements
+
+Possible future improvements:
+
+- skill graph instead of simple keyword mapping
+- richer course difficulty modeling
+- feedback loop from employee selections
+- manager approval workflow
+- LMS integration
+- personalized ranking based on historical completions
+- dashboard for organization-level training-goal compliance
+- multilingual course handling
+- stronger metadata extraction using fine-tuned prompts
+
+---
+
+## 24. Suggested Dependencies
+
+Example `requirements.txt` entries:
+
+```text
+pandas
+openpyxl
+fastapi
+uvicorn
+streamlit
+chromadb
+pydantic
+python-dotenv
+pyyaml
+ragas
+datasets
+langchain
+langchain-community
+sentence-transformers
+pytest
+```
+
+If OpenAI or Azure OpenAI is used for explanation or extraction, also include the relevant client package.
+
+---
+
+## 25. Suggested Environment Variables
+
+Example `.env.example`:
+
+```text
+OPENAI_API_KEY=
+AZURE_OPENAI_API_KEY=
+AZURE_OPENAI_ENDPOINT=
+AZURE_OPENAI_DEPLOYMENT=
+CHROMA_DB_PATH=data/chroma/learning_catalog_db
+LOG_LEVEL=INFO
+```
+
+---
+
+## 26. Final Build Notes for an Agent
+
+When using this document as a build workflow for an agent, follow this order strictly:
+
+1. create project structure
+2. implement data ingestion
+3. export processed CSVs
+4. enrich course metadata
+5. build Chroma index
+6. implement services
+7. implement planning engine
+8. implement FastAPI endpoint
+9. implement Streamlit UI
+10. add optional LLM explanation
+11. add evaluation scripts
+12. run demo scenarios
+13. document outputs and edge cases
+
+Important guardrails for implementation:
+
+- do not use `L1-L6` as learning sequence
+- do not let LLM override deterministic completion filtering
+- do not let RAG replace the planner
+- keep recommendation logic reproducible and testable
+- keep practice mapping configurable, not hardcoded inside the endpoint
