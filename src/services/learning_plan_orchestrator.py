@@ -22,6 +22,47 @@ from utils.logging_utils import get_logger
 logger = get_logger(__name__)
 
 
+def build_employee_intro_markdown(
+    employee_name: str | None,
+    portal_id: int,
+    practice: str | None,
+    target_expertise: str | None,
+) -> str:
+    """Build greeting and employee context as short markdown paragraphs.
+
+    Args:
+        employee_name: Name from user master, if present.
+        portal_id: Resolved portal identifier.
+        practice: Employee practice (e.g. Application Services).
+        target_expertise: Optional focus area for this plan.
+
+    Returns:
+        Markdown string shown at the top of plan responses.
+    """
+    name = (employee_name or "").strip()
+    practice_display = (practice or "").strip()
+    parts: list[str] = []
+    if name:
+        parts.append(f"Hello, **{name}**.")
+    else:
+        parts.append("Hello.")
+    if practice_display:
+        parts.append(
+            f"Your **portal id** is **{portal_id}**. "
+            f"You belong to the employee practice **{practice_display}**.",
+        )
+    else:
+        parts.append(
+            f"Your **portal id** is **{portal_id}**. "
+            "Employee practice was not listed in your profile.",
+        )
+    if target_expertise:
+        te = str(target_expertise).strip()
+        if te:
+            parts.append(f"For this plan, your focus is **{te}**.")
+    return "\n\n".join(parts)
+
+
 class LearningPlanOrchestrator:
     """Coordinates services and planning to produce API responses."""
 
@@ -207,6 +248,12 @@ class LearningPlanOrchestrator:
         return {
             "portal_id": portal_id,
             "employee_name": profile.employee_name,
+            "employee_intro": build_employee_intro_markdown(
+                profile.employee_name,
+                portal_id,
+                profile.practice,
+                target_expertise,
+            ),
             "grade": profile.grade,
             "practice": profile.practice,
             "target_expertise": target_expertise,
@@ -218,7 +265,7 @@ class LearningPlanOrchestrator:
             "recommended_courses": recs,
             "planned_hours": planned,
             "remaining_gap_after_plan": gap,
-            "explanation": explanation,
+            "explanation": explanation.strip() or None,
             "warnings": hour_result.warnings
             + (
                 ["Optional courses were added beyond the strict hour target."]

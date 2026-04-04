@@ -66,14 +66,17 @@ class ExplanationService:
             retrieved_context_chunks: Course text snippets used as grounding.
 
         Returns:
-            Explanation string.
+            Explanation text when requested; empty string when ``include_llm`` is False.
         """
+        if not include_llm:
+            return ""
+
         names = [str(r.get("course_name", "")) for r in recommended]
         practice = employee_context.get("practice")
         expertise = employee_context.get("target_expertise")
         planned = float(employee_context.get("planned_hours", 0.0) or 0.0)
         gap = float(employee_context.get("remaining_gap_after_plan", 0.0) or 0.0)
-        if not include_llm or not self._client.is_configured():
+        if not self._client.is_configured():
             return build_deterministic_explanation(practice, expertise, names, planned, gap)
         prompt = build_plan_explanation_prompt(employee_context, recommended, retrieved_context_chunks)
         try:

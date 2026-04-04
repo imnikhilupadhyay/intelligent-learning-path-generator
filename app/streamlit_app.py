@@ -24,9 +24,16 @@ DEFAULT_API_BASE = "http://127.0.0.1:8000"
 
 def _format_plan_markdown(data: dict) -> str:
     """Render API JSON as compact markdown for chat."""
+    intro = (data.get("employee_intro") or "").strip()
+    if not intro:
+        portal = data.get("portal_id")
+        practice = (data.get("practice") or "").strip() or "—"
+        intro = (
+            f"Hello.\n\nYour **portal id** is **{portal}**. "
+            f"You belong to the employee practice **{practice}**."
+        )
     lines = [
-        f"**{data.get('employee_name') or 'Employee'}** · Portal `{data.get('portal_id')}` · "
-        f"{data.get('practice') or '—'}",
+        intro,
         "",
         f"- Training goal: **{data.get('annual_training_goal_hours') or 0}** h/yr  "
         f"· Completed: **{data.get('completed_hours', 0):.1f}** h  "
@@ -219,12 +226,7 @@ def main() -> None:
             st.rerun()
 
         data = resp.json()
-        summary = (
-            f"Parsed **portal {portal_id}**"
-            + (f" · focus **{intent.target_expertise}**" if intent.target_expertise else "")
-            + "\n\n"
-            + _format_plan_markdown(data)
-        )
+        summary = _format_plan_markdown(data)
         st.session_state.messages.append({"role": "assistant", "content": summary})
         st.rerun()
 

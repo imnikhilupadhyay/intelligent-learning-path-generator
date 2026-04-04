@@ -18,7 +18,7 @@ class LearningPlanIntent:
 
 _PORTAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
-        r"(?i)\b(?:portal|employee|user)\s*(?:id)?\s*[:#=]?\s*(\d{2,})\b",
+        r"(?i)\b(?:portal|protal|employee|user)\s*(?:id)?\s*[:#=]?\s*(\d{2,})\b",
     ),
     re.compile(r"(?i)\b(?:id|no\.?)\s*[:=]\s*(\d{2,})\b"),
     re.compile(r"(?i)\b#\s*(\d{2,})\b"),
@@ -33,6 +33,9 @@ _EXPERTISE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)\blearn(?:ing)?\s+(.+?)(?:[.,;!?]|\n|$)"),
     re.compile(r"(?i)\bskills?\s+(?:in|on)\s+(.+?)(?:[.,;!?]|\n|$)"),
     re.compile(r"(?i)\b(?:interested\s+in|want\s+to\s+learn)\s+(.+?)(?:[.,;!?]|\n|$)"),
+    re.compile(
+        r"(?i)\b(?:strengthen|improve|deepen)\s+(?:my\s+)?(.+?)\s+skills?(?:[.,;!?]|\n|$)",
+    ),
 )
 
 

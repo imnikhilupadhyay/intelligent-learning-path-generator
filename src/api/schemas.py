@@ -34,6 +34,12 @@ class GeneratePlanResponse(BaseModel):
 
     portal_id: int
     employee_name: str | None = None
+    employee_intro: str = Field(
+        ...,
+        description=(
+            "Greeting and employee context: name, portal id wording, practice, optional focus"
+        ),
+    )
     grade: float | None = None
     practice: str | None = None
     target_expertise: str | None = None

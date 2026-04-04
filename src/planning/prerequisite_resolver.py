@@ -121,12 +121,26 @@ def build_ordered_ids_with_prereqs(
     rec_list = list(dict.fromkeys(recommended_ids))
     result: list[int] = []
     seen: set[int] = set()
+    visiting: set[int] = set()
 
     def add_chain(cid: int) -> None:
+        """Depth-first prerequisite expansion with cycle and self-loop guards."""
+        if cid in seen:
+            return
+        if cid in visiting:
+            # Prerequisite graph has a cycle (e.g. A→B→A); stop this branch.
+            return
+        visiting.add(cid)
         info = course_rows_by_id.get(cid)
         prereq_id = info.mapped_prerequisite_course_id if info else None
-        if prereq_id is not None and prereq_id not in completed_ids and prereq_id not in seen:
+        if (
+            prereq_id is not None
+            and prereq_id != cid
+            and prereq_id not in completed_ids
+            and prereq_id not in seen
+        ):
             add_chain(prereq_id)
+        visiting.discard(cid)
         if cid not in seen:
             result.append(cid)
             seen.add(cid)
