@@ -40,21 +40,30 @@ uvicorn api.main:app --app-dir src --reload
 
 - `GET /` — redirects to **`/docs`** (Swagger UI)
 - `GET /health`
-- `POST /generate-plan` — JSON body example:
+- `POST /generate-plan` — **Minimal body** (only **`portal_id`** is required; other fields default in JSON):
+
+  ```json
+  { "portal_id": 123 }
+  ```
+
+  Typical optional fields:
 
   ```json
   {
     "portal_id": 123,
     "target_expertise": "Java",
     "include_explanation": false,
-    "include_optional_courses": false,
-    "session_run_id": null
+    "include_optional_courses": false
   }
   ```
 
-  Retrieval breadth is **not** in the body: set **`LEARNING_PATH_TOP_K`** in `.env` on the API host (default `15`). The response includes **`run_id`**, **`employee_intro`**, **`ragas_evaluation_inputs`**, and other plan fields (see OpenAPI). Optional **`session_run_id`**: reuse the same UUID for the same **`portal_id`** in your client when the saved session file exists; otherwise a new **`run_id`** is created and **`data/evaluation/run_ids/session.csv`** gets a new row.
+  Do **not** send **`session_run_id`** until you already have a **`run_id`** from a previous response. For a repeat plan for the same employee in the same client session, pass **`"session_run_id": "<that run_id>"`** so the server can reuse the same run id when the saved session still matches **`portal_id`**.
+
+  Retrieval breadth is **not** in the body: set **`LEARNING_PATH_TOP_K`** in `.env` on the API host (default `15`). The response includes a newly minted or reused **`run_id`**, **`employee_intro`**, **`ragas_evaluation_inputs`**, etc. (see OpenAPI).
 
 - `GET /evaluation/ragas-metrics/{run_id}` — RAGAS **faithfulness** and **answer relevancy** as JSON (**`OPENAI_API_KEY`** or Azure key on the API host). Uses **`RAGAS_LLM_MODEL`** (default **`gpt-4o-mini`**) and **`RAGAS_EMBEDDING_MODEL`** (default **`text-embedding-3-small`**) so metrics stay separate from **`OPENAI_MODEL`** (e.g. o-series for explanations). Loads the snapshot from **`data/evaluation/session_runs/`** (with fallback to a legacy JSON at `data/evaluation/<run_id>_session.json` if present).
+
+**Why two routes:** plan generation stays a focused **`POST /generate-plan`** without embedding evaluation logic. Scoring and future metrics (**`GET /evaluation/...`**) can grow as separate endpoints (or “plugins”) that read the persisted **`run_id`** snapshot, without bloating the plan handler.
 
 ## Streamlit UI
 

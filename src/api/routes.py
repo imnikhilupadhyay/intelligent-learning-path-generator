@@ -42,7 +42,12 @@ def health() -> HealthResponse:
 
 @router.post("/generate-plan", response_model=GeneratePlanResponse)
 def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
-    """Generate a personalized learning plan for an employee."""
+    """Generate a personalized learning plan for an employee.
+
+    Returns ``run_id`` and persists ``session_runs/<run_id>_session.json``. Omit
+    ``session_run_id`` until you have a prior ``run_id`` from this endpoint.
+    Evaluation metrics are separate routes under ``/evaluation/`` (e.g. RAGAS).
+    """
     try:
         payload = _orchestrator.generate_plan(
             portal_id=body.portal_id,
@@ -70,7 +75,11 @@ def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
 
 @router.get("/evaluation/ragas-metrics/{run_id}", response_model=RagasMetricsResponse)
 def ragas_metrics(run_id: str) -> RagasMetricsResponse:
-    """Compute RAGAS scores for a saved plan run (requires ``OPENAI_API_KEY`` on the API host)."""
+    """Compute RAGAS scores for a saved plan run (requires ``OPENAI_API_KEY`` on the API host).
+
+    Decoupled from ``POST /generate-plan`` so additional eval endpoints can follow
+    the same pattern without changing the plan request/response shape.
+    """
     if not is_valid_run_id(run_id):
         raise HTTPException(status_code=400, detail="Invalid run_id; expected a UUID string.")
     session = load_session_json(run_id.strip())

@@ -477,6 +477,7 @@ Global Support:
 4. Practice mapping config-driven
 5. Explainability included
 6. Evaluation included for both rule engine and RAG
+7. HTTP evaluation (e.g. RAGAS) on separate **`GET /evaluation/...`** routes from **`POST /generate-plan`**, so new metrics can be added without inflating the plan endpoint
 
 ---
 
@@ -602,21 +603,34 @@ ai-learning-path-assistant/
 - optional `target_expertise`
 - optional `include_explanation` (LLM explanation only when true)
 - optional `include_optional_courses` (supplemental courses beyond strict hour target)
-- optional `session_run_id` (UUID from a prior response in the same client session; server reuses it only if `data/evaluation/session_runs/<run_id>_session.json` exists and stored `portal_id` matches)
+- optional `session_run_id` — **omit on the first request.** After the API returns **`run_id`**, the client may pass that UUID on a later `POST` for the same **`portal_id`** in the same session so the server reuses the run id (only if `data/evaluation/session_runs/<run_id>_session.json` exists and stored `portal_id` matches).
 
 **Retrieval breadth** `top_k` is **not** sent in the JSON body. Configure it on the API host with environment variable **`LEARNING_PATH_TOP_K`** (clamped to a safe range; default 15). See `src/utils/constants.py`.
 
-Example:
+Typical first request (minimal):
 
 ```json
 {
   "portal_id": 24463,
   "target_expertise": "Java",
   "include_explanation": true,
+  "include_optional_courses": false
+}
+```
+
+Repeat plan, same portal in the same client (optional):
+
+```json
+{
+  "portal_id": 24463,
+  "target_expertise": "Java",
+  "include_explanation": false,
   "include_optional_courses": false,
   "session_run_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+
+(`session_run_id` must be the **`run_id`** returned by a prior successful `POST /generate-plan`.)
 
 ### Step 2. Fetch employee profile
 
@@ -1160,17 +1174,18 @@ Response:
 POST /generate-plan
 ```
 
-Request example:
+Request example (omit **`session_run_id`** until you have a prior **`run_id`**; see §9 Step 1):
 
 ```json
 {
   "portal_id": 24463,
   "target_expertise": "Java",
   "include_explanation": true,
-  "include_optional_courses": false,
-  "session_run_id": null
+  "include_optional_courses": false
 }
 ```
+
+**API split:** evaluation metrics use separate **`GET /evaluation/...`** routes so new scorers can be added without coupling them to **`POST /generate-plan`**.
 
 Response example (abbreviated; see OpenAPI schema for full model):
 

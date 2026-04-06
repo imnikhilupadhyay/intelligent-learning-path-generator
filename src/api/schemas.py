@@ -20,8 +20,10 @@ class GeneratePlanRequest(BaseModel):
     session_run_id: str | None = Field(
         default=None,
         description=(
-            "Optional UUID from a prior plan in the same client session; "
-            "server reuses it only if the stored session exists and portal_id matches."
+            "Omit on the first plan request. After `POST /generate-plan` returns `run_id`, "
+            "clients may pass that same UUID here when requesting another plan for the "
+            "same `portal_id` in the same browser/session so the server reuses the run id "
+            "(only if the saved session file exists and `portal_id` still matches)."
         ),
     )
 
