@@ -44,7 +44,7 @@ def run_ragas_synthetic_note() -> str:
     return (
         "RAGAS metrics (faithfulness, answer relevancy, context precision/recall) should be run "
         "with your chosen LLM/embeddings providers. Populate src/evaluation/datasets/eval_records.jsonl "
-        "using the schema from workflow.md §12.4, then install ragas and execute a small "
+        "using the schema from workflow.md section 12.4, then install ragas and execute a small "
         "LangChain-style evaluation loop against your retrieval and explanation outputs."
     )
 

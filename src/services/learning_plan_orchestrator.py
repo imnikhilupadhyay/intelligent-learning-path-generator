@@ -63,6 +63,45 @@ def build_employee_intro_markdown(
     return "\n\n".join(parts)
 
 
+def build_ragas_evaluation_inputs(
+    portal_id: int,
+    target_expertise: str | None,
+    explanation: str | None,
+    recommended: list[dict[str, Any]],
+    context_chunks: list[str],
+) -> dict[str, Any]:
+    """Build question/answer/contexts for RAG-style evaluation (e.g. RAGAS).
+
+    Args:
+        portal_id: Employee portal id.
+        target_expertise: Optional user focus.
+        explanation: Optional LLM/deterministic explanation text.
+        recommended: Recommendation dicts from the plan.
+        context_chunks: Course title+summary snippets used for grounding.
+
+    Returns:
+        Mapping with ``question``, ``answer``, and ``contexts`` (list of str).
+    """
+    q = f"What learning courses should be recommended for portal id {portal_id}"
+    if target_expertise and str(target_expertise).strip():
+        q += f", with emphasis on {str(target_expertise).strip()}"
+    q += "?"
+    lines: list[str] = []
+    for r in recommended:
+        nm = str(r.get("course_name", "") or "")
+        cid = r.get("course_id", "")
+        reason = str(r.get("reason", "") or "")
+        lines.append(f"{nm} (id {cid}): {reason}")
+    recap = "\n".join(lines) if lines else "No courses recommended."
+    parts_a: list[str] = []
+    if explanation and str(explanation).strip():
+        parts_a.append(str(explanation).strip())
+    parts_a.append("Plan summary:\n" + recap)
+    answer = "\n\n".join(parts_a)
+    ctx = list(context_chunks) if context_chunks else ["(No course context snippets.)"]
+    return {"question": q, "answer": answer, "contexts": ctx}
+
+
 class LearningPlanOrchestrator:
     """Coordinates services and planning to produce API responses."""
 
@@ -266,6 +305,13 @@ class LearningPlanOrchestrator:
             "planned_hours": planned,
             "remaining_gap_after_plan": gap,
             "explanation": explanation.strip() or None,
+            "ragas_evaluation_inputs": build_ragas_evaluation_inputs(
+                portal_id,
+                target_expertise,
+                explanation.strip() or None,
+                recs,
+                context_chunks,
+            ),
             "warnings": hour_result.warnings
             + (
                 ["Optional courses were added beyond the strict hour target."]

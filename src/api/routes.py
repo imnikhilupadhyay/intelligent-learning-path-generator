@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 
-from api.schemas import GeneratePlanRequest, GeneratePlanResponse, HealthResponse
+from api.schemas import (
+    GeneratePlanRequest,
+    GeneratePlanResponse,
+    HealthResponse,
+    RagasMetricsResponse,
+)
+from evaluation.ragas_metrics import compute_ragas_scores
+from evaluation.session_store import (
+    append_session_csv_row,
+    is_valid_run_id,
+    load_session_json,
+    resolve_run_id,
+    write_session_json,
+)
 from services.learning_plan_orchestrator import LearningPlanOrchestrator
 from utils.constants import get_retrieval_top_k
 
@@ -42,4 +57,33 @@ def generate_plan(body: GeneratePlanRequest) -> GeneratePlanResponse:
         raise HTTPException(status_code=code, detail=detail) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=f"Data file missing: {exc}") from exc
-    return GeneratePlanResponse(**payload)
+
+    run_id, is_new_run = resolve_run_id(body.portal_id, body.session_run_id)
+    ts = datetime.now(timezone.utc).isoformat()
+    if is_new_run:
+        append_session_csv_row(run_id, body.portal_id, ts)
+    stored = {**payload, "run_id": run_id}
+    write_session_json(run_id, stored)
+    out = {**payload, "run_id": run_id}
+    return GeneratePlanResponse(**out)
+
+
+@router.get("/evaluation/ragas-metrics/{run_id}", response_model=RagasMetricsResponse)
+def ragas_metrics(run_id: str) -> RagasMetricsResponse:
+    """Compute RAGAS scores for a saved plan run (requires ``OPENAI_API_KEY`` on the API host)."""
+    if not is_valid_run_id(run_id):
+        raise HTTPException(status_code=400, detail="Invalid run_id; expected a UUID string.")
+    session = load_session_json(run_id.strip())
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved session for run_id={run_id!r} (generate a plan first).",
+        )
+    result = compute_ragas_scores(session)
+    return RagasMetricsResponse(
+        run_id=result.get("run_id"),
+        portal_id=result.get("portal_id"),
+        scores=result.get("scores") or {},
+        metric_descriptions=result.get("metric_descriptions") or {},
+        error=result.get("error"),
+    )

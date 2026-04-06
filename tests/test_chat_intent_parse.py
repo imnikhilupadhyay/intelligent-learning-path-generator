@@ -6,6 +6,7 @@ from utils.chat_intent_parse import (
     explain_portal_resolution_failure,
     parse_learning_plan_intent,
     resolve_portal_id,
+    wants_ragas_scores,
 )
 
 
@@ -32,3 +33,13 @@ def test_explicit_portal_preferred() -> None:
 def test_explain_failure() -> None:
     intent = parse_learning_plan_intent("hello")
     assert "portal id" in explain_portal_resolution_failure(intent).lower()
+
+
+def test_wants_ragas_scores_keyword() -> None:
+    assert wants_ragas_scores("show me RAGAS scores") is True
+    assert wants_ragas_scores("What are the rag scores?") is True
+
+
+def test_wants_ragas_scores_negative() -> None:
+    assert wants_ragas_scores("plan for portal 12345") is False
+    assert wants_ragas_scores("") is False

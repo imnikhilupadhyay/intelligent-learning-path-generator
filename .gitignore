@@ -1,1 +1,11 @@
 .env
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+.Python
+data/evaluation/run_ids/*
+!data/evaluation/run_ids/.gitkeep
+data/evaluation/session_runs/*
+!data/evaluation/session_runs/.gitkeep

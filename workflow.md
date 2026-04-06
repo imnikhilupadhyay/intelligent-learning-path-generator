@@ -12,6 +12,7 @@ AI Learning Path Assistant is a hybrid recommendation system that generates pers
 - lightweight semantic retrieval using ChromaDB
 - optional LLM-based explanation and metadata extraction
 - RAG evaluation using RAGAS for the retrieval/explanation layer
+- per-plan **run logging**: UUID `run_id`, append-only `session.csv`, and full JSON snapshots under `data/evaluation/session_runs/` for auditing and on-demand RAGAS scoring
 
 This project is designed for the capstone use case where the system must generate a learning plan for an employee based on their profile, annual training target, completed courses, and role context.
 
@@ -62,8 +63,9 @@ The system must:
 8. Estimate and accumulate course duration
 9. Align recommendations with the employee’s training goal
 10. Return a final learning plan with reasons
-11. Evaluate the RAG layer with RAGAS
+11. Evaluate the RAG layer with RAGAS (offline scripts and/or HTTP metrics on saved runs)
 12. Evaluate the deterministic planner with business metrics
+13. Persist each plan run (`run_id`, `session.csv`, `session_runs/*.json`) for audit and on-demand RAGAS
 
 ---
 
@@ -455,7 +457,16 @@ Global Support:
                                      ▼
                           ┌──────────────────────────┐
                           │ Final Response Payload   │
-                          └──────────────────────────┘
+                          │ + ragas_evaluation_inputs│
+                          └────────────┬─────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    ▼                                     ▼
+         ┌─────────────────────┐              ┌─────────────────────┐
+         │ Session persistence │              │ GET RAGAS metrics   │
+         │ session_runs/*.json │              │ (optional, API/UI)  │
+         │ run_ids/session.csv │              └─────────────────────┘
+         └─────────────────────┘
 ```
 
 ### 7.2 Architecture Principles
@@ -484,9 +495,9 @@ ai-learning-path-assistant/
 │
 ├── data/
 │   ├── raw/
-│   │   ├── user_master.xlsx
-│   │   ├── completion_data.xlsx
-│   │   └── course_master.xlsx
+│   │   ├── user_master.xlsx          # or capstone export: User Master List.xlsx
+│   │   ├── completion_data.xlsx      # or: Completion Data.xlsx
+│   │   └── course_master.xlsx        # or: Course Master List.xlsx
 │   │
 │   ├── processed/
 │   │   ├── user_master.csv
@@ -494,8 +505,14 @@ ai-learning-path-assistant/
 │   │   ├── course_master.csv
 │   │   └── course_master_enriched.csv
 │   │
-│   └── chroma/
-│       └── learning_catalog_db/
+│   ├── chroma/
+│   │   └── learning_catalog_db/
+│   │
+│   └── evaluation/
+│       ├── run_ids/
+│       │   └── session.csv           # run_id, timestamp, portal_id (new runs only)
+│       └── session_runs/
+│           └── <run_id>_session.json  # full plan payload + ragas_evaluation_inputs
 │
 ├── src/
 │   ├── api/
@@ -515,7 +532,8 @@ ai-learning-path-assistant/
 │   │   ├── course_service.py
 │   │   ├── retrieval_service.py
 │   │   ├── practice_mapper.py
-│   │   └── explanation_service.py
+│   │   ├── explanation_service.py
+│   │   └── learning_plan_orchestrator.py
 │   │
 │   ├── planning/
 │   │   ├── ranking_engine.py
@@ -530,31 +548,45 @@ ai-learning-path-assistant/
 │   │   └── metadata_extractor.py
 │   │
 │   ├── evaluation/
+│   │   ├── __main__.py              # runnable: python src/evaluation/__main__.py
 │   │   ├── evaluate_rule_engine.py
 │   │   ├── evaluate_rag.py
 │   │   ├── ragas_runner.py
+│   │   ├── ragas_metrics.py         # faithfulness + answer_relevancy via ragas.evaluate
+│   │   ├── session_store.py         # run_id, CSV append, session JSON paths
 │   │   └── datasets/
 │   │
 │   └── utils/
 │       ├── logging_utils.py
 │       ├── text_utils.py
 │       ├── file_utils.py
-│       └── constants.py
+│       ├── constants.py             # paths, LEARNING_PATH_TOP_K, evaluation dirs
+│       └── chat_intent_parse.py     # NL portal/expertise + RAGAS intent (Streamlit)
 │
 ├── tests/
 │   ├── test_user_service.py
 │   ├── test_completion_service.py
 │   ├── test_practice_mapper.py
 │   ├── test_retrieval_service.py
+│   ├── test_retrieval_top_k_env.py
 │   ├── test_duration_estimator.py
 │   ├── test_prerequisite_resolver.py
-│   └── test_plan_builder.py
+│   ├── test_plan_builder.py
+│   ├── test_hour_optimizer.py
+│   ├── test_explanation_service.py
+│   ├── test_chat_intent_parse.py
+│   ├── test_session_store.py
+│   ├── test_api_session_logging.py
+│   ├── test_ragas_metrics.py
+│   └── ...
 │
 ├── notebooks/
 │   └── eda.ipynb
 │
+├── run_ingestion.py
 ├── requirements.txt
 ├── README.md
+├── workflow.md
 └── .env.example
 ```
 
@@ -564,12 +596,15 @@ ai-learning-path-assistant/
 
 ### Step 1. User submits request
 
-Input fields:
+**API (`POST /generate-plan`)** input fields:
 
-- `portal_id`
+- `portal_id` (required)
 - optional `target_expertise`
-- optional `top_k`
-- optional `include_explanation`
+- optional `include_explanation` (LLM explanation only when true)
+- optional `include_optional_courses` (supplemental courses beyond strict hour target)
+- optional `session_run_id` (UUID from a prior response in the same client session; server reuses it only if `data/evaluation/session_runs/<run_id>_session.json` exists and stored `portal_id` matches)
+
+**Retrieval breadth** `top_k` is **not** sent in the JSON body. Configure it on the API host with environment variable **`LEARNING_PATH_TOP_K`** (clamped to a safe range; default 15). See `src/utils/constants.py`.
 
 Example:
 
@@ -578,7 +613,8 @@ Example:
   "portal_id": 24463,
   "target_expertise": "Java",
   "include_explanation": true,
-  "top_k": 15
+  "include_optional_courses": false,
+  "session_run_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -638,7 +674,7 @@ Example query:
 Global Support service desk incident management servicenow support operations
 ```
 
-Retrieve top-k candidate courses.
+Retrieve top-k candidate courses (k from `LEARNING_PATH_TOP_K`).
 
 #### C. Merge and deduplicate
 Combine keyword and semantic results.
@@ -732,13 +768,27 @@ Optional LLM explanation should state:
 
 Include:
 
-- employee context
+- **`employee_intro`**: short markdown greeting (name, portal id, practice, optional focus)
+- employee context fields (`portal_id`, `practice`, `grade`, etc.)
 - completed courses
 - recommended courses
 - duration totals
 - remaining gap
-- rationale
-- warnings if parsing or duration is uncertain
+- **`explanation`**: natural-language explanation only when `include_explanation` is true; otherwise omit or null
+- **`ragas_evaluation_inputs`**: `question`, `answer`, `contexts` for RAG-style evaluation
+- **`run_id`**: UUID for this persisted plan run
+- warnings if parsing or duration is uncertain (e.g. no remaining target hours, optional courses added)
+
+### Step 14. Persist run and optional RAGAS (implemented)
+
+After a successful plan:
+
+1. Resolve `run_id`: reuse `session_run_id` when valid JSON exists and `portal_id` matches; else mint a new UUID.
+2. If new run: append one row to `data/evaluation/run_ids/session.csv` (`run_id`, `timestamp`, `portal_id`).
+3. Write full payload to `data/evaluation/session_runs/<run_id>_session.json`.
+4. **Legacy path:** older deployments may still have `data/evaluation/<run_id>_session.json`; loaders may fall back for reads.
+
+**RAGAS at runtime:** clients call `GET /evaluation/ragas-metrics/{run_id}` (or the Streamlit UI asks for “RAGAS scores”) to score the saved session. Requires `OPENAI_API_KEY` (or Azure key) and uses legacy RAGAS metrics (`faithfulness`, `answer_relevancy`) with `ragas.evaluate(..., llm=..., embeddings=...)` — see §12.6.
 
 ---
 
@@ -838,9 +888,14 @@ Suggested metadata:
 
 1. build query from practice skills + target expertise
 2. query Chroma
-3. fetch top-k semantic matches
+3. fetch top-k semantic matches (k from **`LEARNING_PATH_TOP_K`**)
 4. merge with keyword matches
 5. deduplicate and score
+
+### 11.5 Retrieval configuration
+
+- **`config/retrieval_config.yaml`**: Chroma collection name and merge settings.
+- **`LEARNING_PATH_TOP_K`**: environment override for hybrid retrieval breadth (API host).
 
 ---
 
@@ -923,6 +978,24 @@ Compare:
 - hybrid retrieval
 - hybrid retrieval plus practice mapping
 
+### 12.6 Runtime RAGAS integration (implemented)
+
+**Endpoint:** `GET /evaluation/ragas-metrics/{run_id}`
+
+- Loads `data/evaluation/session_runs/<run_id>_session.json` (with fallback to legacy `data/evaluation/<run_id>_session.json` if present).
+- Builds a single-row Hugging Face `Dataset` with columns `user_input`, `response`, `retrieved_contexts` from `ragas_evaluation_inputs`.
+- Calls **`ragas.evaluate`** with **legacy** metric instances `faithfulness` and `answer_relevancy` from `ragas.metrics._faithfulness` / `_answer_relevance` (RAGAS 0.4 `evaluate()` requires `ragas.metrics.base.Metric`; `ragas.metrics.collections` classes are incompatible).
+- Passes **`llm`** from `ragas.llms.llm_factory(model, client=OpenAI(...))` and **`embeddings`** from **`langchain_openai.embeddings.OpenAIEmbeddings`** (answer relevancy uses LangChain `embed_query` / `embed_documents`).
+
+**Environment (in addition to keys and `OPENAI_BASE_URL`):**
+
+- **`RAGAS_LLM_MODEL`** — default `gpt-4o-mini` (avoid o-series for structured metric calls; separate from **`OPENAI_MODEL`** used for plan explanations).
+- **`RAGAS_EMBEDDING_MODEL`** — default `text-embedding-3-small`.
+
+**Response JSON** includes `run_id`, `portal_id`, `scores`, `metric_descriptions` (static explanations), and `error` if evaluation failed or misconfigured.
+
+**Streamlit:** natural-language phrases (e.g. “RAGAS scores”, “rag scores”) trigger the metrics call using the **last successful plan’s `run_id`** in the session; response shows **Run ID**, **Portal ID**, a score table, and metric descriptions.
+
 ---
 
 ## 13. Detailed Module Responsibilities
@@ -990,15 +1063,47 @@ Responsibilities:
 - parse prerequisite text
 - map text to course candidates where possible
 - build prerequisite ordering
+- **guardrails:** detect prerequisite cycles and break them; ignore self-loop prerequisites (`prereq_id == course_id`)
 
-### 13.8 ranking_engine.py
+### 13.8 learning_plan_orchestrator.py
+
+Responsibilities:
+
+- wire user, completion, course, retrieval, explanation services
+- run ranking, prerequisite ordering, hour optimization, plan assembly
+- build **`employee_intro`** and **`ragas_evaluation_inputs`** for the API payload
+
+### 13.9 session_store.py (`src/evaluation/`)
+
+Responsibilities:
+
+- validate UUID `run_id`
+- **`session_json_path`** → `data/evaluation/session_runs/<run_id>_session.json`
+- append **`data/evaluation/run_ids/session.csv`** on new runs only
+- **`resolve_run_id(portal_id, session_run_id)`** for reuse semantics
+
+### 13.10 ragas_metrics.py (`src/evaluation/`)
+
+Responsibilities:
+
+- **`compute_ragas_scores(session_payload)`** for the RAGAS HTTP endpoint
+- static **`RAGAS_METRIC_DESCRIPTIONS`** for UI/API consumers
+
+### 13.11 chat_intent_parse.py (`src/utils/`)
+
+Responsibilities:
+
+- parse portal id and optional target expertise from free text (labeled patterns + directory resolution)
+- **`wants_ragas_scores(message)`** for Streamlit RAGAS shortcut
+
+### 13.12 ranking_engine.py
 
 Responsibilities:
 
 - compute relevance score
 - combine practice, expertise, semantic similarity, grade, readiness
 
-### 13.9 hour_optimizer.py
+### 13.13 hour_optimizer.py
 
 Responsibilities:
 
@@ -1006,7 +1111,7 @@ Responsibilities:
 - align with target hours
 - manage overshoot logic
 
-### 13.10 plan_builder.py
+### 13.14 plan_builder.py
 
 Responsibilities:
 
@@ -1014,17 +1119,26 @@ Responsibilities:
 - attach reasons and notes
 - format plan output
 
-### 13.11 explanation_service.py
+### 13.15 explanation_service.py
 
 Responsibilities:
 
-- call optional LLM
-- create concise grounded explanation
+- call optional LLM when **`include_llm`** is true
+- when explanation is not requested, return empty / no LLM call (orchestrator may store `explanation` as null)
+- create concise grounded explanation when enabled
 - avoid unsupported claims
 
 ---
 
 ## 14. API Design
+
+### 14.0 Root and documentation
+
+```http
+GET /
+```
+
+Redirects to **`/docs`** (Swagger UI). There is no separate HTML landing page.
 
 ### 14.1 Health Endpoint
 
@@ -1053,16 +1167,18 @@ Request example:
   "portal_id": 24463,
   "target_expertise": "Java",
   "include_explanation": true,
-  "top_k": 15
+  "include_optional_courses": false,
+  "session_run_id": null
 }
 ```
 
-Response example:
+Response example (abbreviated; see OpenAPI schema for full model):
 
 ```json
 {
   "portal_id": 24463,
   "employee_name": "Shefali Joisa",
+  "employee_intro": "Hello, **Shefali Joisa**.\n\nYour **portal id** is **24463**...",
   "grade": 13,
   "practice": "Application Services",
   "target_expertise": "Java",
@@ -1070,12 +1186,7 @@ Response example:
   "completed_course_ids": [118],
   "completed_hours": 2,
   "remaining_target_hours": 14,
-  "skills_used_for_retrieval": [
-    "java",
-    "backend",
-    "programming",
-    "testing"
-  ],
+  "skills_used_for_retrieval": ["java", "backend", "programming", "testing"],
   "recommended_courses": [
     {
       "course_id": 119,
@@ -1083,61 +1194,75 @@ Response example:
       "hours": 3,
       "prerequisite": "Knowledge of Java Application Deployment",
       "reason": "Matches Java skill theme and is relevant for application development."
-    },
-    {
-      "course_id": 120,
-      "course_name": "Effective Java - General Coding Practices",
-      "hours": 4,
-      "prerequisite": null,
-      "reason": "Improves coding practices for Java developers."
     }
   ],
   "planned_hours": 7,
   "remaining_gap_after_plan": 7,
-  "explanation": "These recommendations align with Application Services and focus on Java development fundamentals and coding quality."
+  "explanation": null,
+  "warnings": [],
+  "run_id": "005e6ac3-8a29-437b-a48e-5366e5c21924",
+  "ragas_evaluation_inputs": {
+    "question": "What learning courses should be recommended for portal id 24463, with emphasis on Java?",
+    "answer": "Plan summary:\n...",
+    "contexts": ["Course A: summary...", "..."]
+  }
 }
 ```
+
+Side effects: writes **`data/evaluation/session_runs/<run_id>_session.json`** and may append **`data/evaluation/run_ids/session.csv`**.
+
+### 14.3 RAGAS metrics endpoint
+
+```http
+GET /evaluation/ragas-metrics/{run_id}
+```
+
+- **`run_id`**: UUID string (same as returned by `POST /generate-plan`).
+- Returns JSON: `run_id`, `portal_id`, `scores`, `metric_descriptions`, `error` (if any).
+- Non-UI API clients must pass **`run_id`** explicitly. Streamlit uses the session’s last plan `run_id` when the user asks for RAGAS scores in chat.
 
 ---
 
 ## 15. Streamlit UI Requirements
 
-The UI should support:
+**Implemented:** chat-style UI (`app/streamlit_app.py`), not a static form.
 
-- input field for Portal ID
-- optional input for Target Expertise
-- checkbox for Include Explanation
-- button to Generate Plan
+The UI supports:
 
-The UI should display:
+- natural-language messages; parsing extracts **portal id** (e.g. “portal id 24463”, “employee 24463”) and optional **target expertise** (“focus on Java”, “deepen my Java skills”, etc.)
+- validation of portal id against ingested **`user_master`**
+- **➕** control: **Include explanation**, **Include optional courses** (apply to next send)
+- sidebar: **API base URL** (default `http://127.0.0.1:8000`); retrieval `top_k` is configured on the API via **`LEARNING_PATH_TOP_K`**
+- **session `run_id` bookkeeping:** maps each `portal_id` to the latest `run_id` for `session_run_id` on repeat plans in the same browser session
+- **RAGAS shortcut:** user messages matching RAGAS / rag scores intent call `GET /evaluation/ragas-metrics/{last_plan_run_id}` and show **Run ID**, **Portal ID**, score table, and static metric descriptions
 
-- employee metadata
-- training goal
-- completed courses
-- recommended courses
-- hours per course
-- total planned hours
-- remaining gap
-- optional explanation
+The UI displays API output as markdown:
 
-Optional advanced UI:
+- **`employee_intro`** and plan summary (hours, skills, recommended courses, explanation if present, warnings)
+
+Optional future UI:
 
 - show retrieved candidate courses
 - show filtered-out completed courses
 - show ranking explanation
-- show notes for unknown duration or unmapped prerequisites
 
 ---
 
 ## 16. Ingestion and Data Preparation Pipeline
 
+Entry point: **`run_ingestion.py`** (repo root).
+
 ### Step 1. Load Excel Files
 
-Read:
+Resolve workbooks from **`data/raw/`** (or **`LEARNING_PATH_RAW_DIR`**). Default filenames (first existing wins):
 
-- user master
-- completion data
-- course master
+- `user_master.xlsx` **or** `User Master List.xlsx`
+- `completion_data.xlsx` **or** `Completion Data.xlsx`
+- `course_master.xlsx` **or** `Course Master List.xlsx`
+
+Optional per-file path overrides: **`LEARNING_PATH_USER_MASTER_XLSX`**, **`LEARNING_PATH_COMPLETION_XLSX`**, **`LEARNING_PATH_COURSE_MASTER_XLSX`**.
+
+Ingestion should fail with a clear error if expected raw files are missing.
 
 ### Step 2. Clean Columns
 
@@ -1217,15 +1342,14 @@ data/chroma/learning_catalog_db/
 
 - create FastAPI app
 - define schemas
-- add routes
-- health endpoint
-- generate-plan endpoint
+- add routes: `GET /` → `/docs`, `GET /health`, `POST /generate-plan`, `GET /evaluation/ragas-metrics/{run_id}`
+- generate-plan: session persistence, `run_id`, `ragas_evaluation_inputs`
 
 ### Phase 7. UI Layer
 
-- build Streamlit form
-- connect to API
-- render plan and explanation
+- build Streamlit chat UI
+- connect to API (portal/expertise parsing, options popover)
+- render plan; optional RAGAS scores flow
 
 ### Phase 8. Optional LLM Layer
 
@@ -1236,8 +1360,8 @@ data/chroma/learning_catalog_db/
 
 ### Phase 9. Evaluation
 
-- business metrics runner
-- RAGAS runner
+- business metrics runner (`python src/evaluation/__main__.py` or `python -m evaluation` with `PYTHONPATH=src`)
+- RAGAS: offline `ragas_runner.py` plus **runtime** `ragas_metrics.py` + HTTP endpoint
 - retrieval strategy comparison
 
 ### Phase 10. Packaging
@@ -1346,10 +1470,11 @@ Test:
 
 Test:
 
-- API end-to-end
+- API end-to-end (including `run_id` persistence and RAGAS route wiring)
 - Chroma retrieval integration
 - enrichment pipeline
 - explanation integration
+- session store and intent parsing (unit tests)
 
 ### Demo Scenarios
 
@@ -1375,12 +1500,13 @@ The project is successful if it can:
 6. use semantic retrieval effectively for messy summaries
 7. optionally explain recommendations clearly
 8. report both rule-engine and RAG metrics
+9. expose persisted runs and a working RAGAS metrics path for saved sessions (`run_id` / `portal_id`)
 
 ---
 
 ## 22. Final Positioning
 
-AI Learning Path Assistant is a hybrid recommendation engine that combines structured employee data, practice-aware skill mapping, course completion history, semantic retrieval over course metadata, and deterministic planning logic to generate personalized, prerequisite-aware, and training-goal-aligned learning plans.
+AI Learning Path Assistant is a hybrid recommendation engine that combines structured employee data, practice-aware skill mapping, course completion history, semantic retrieval over course metadata, and deterministic planning logic to generate personalized, prerequisite-aware, and training-goal-aligned learning plans. The FastAPI layer assigns a **`run_id`** per plan, stores the full response for evaluation under **`data/evaluation/session_runs/`**, and can score that snapshot with RAGAS via a dedicated HTTP endpoint or the Streamlit chat shortcut.
 
 ---
 
@@ -1418,25 +1544,47 @@ ragas
 datasets
 langchain
 langchain-community
+langchain-openai
 sentence-transformers
+httpx
+requests
 pytest
 ```
 
-If OpenAI or Azure OpenAI is used for explanation or extraction, also include the relevant client package.
+If OpenAI or Azure OpenAI is used for explanation, extraction, or RAGAS metric calls, configure keys and (for Azure) endpoint/deployment as in §25. The **`openai`** Python package is pulled in by RAGAS / LangChain stacks used at runtime.
 
 ---
 
 ## 25. Suggested Environment Variables
 
-Example `.env.example`:
+Example `.env.example` (representative; see repository file for current list):
 
 ```text
 OPENAI_API_KEY=
+# Default chat model for plan explanations (o-series omits temperature where required)
+OPENAI_MODEL=o3-mini
+# OPENAI_REASONING_EFFORT=medium   # optional for o-series: low | medium | high
+# OPENAI_BASE_URL=https://api.openai.com/v1
+
 AZURE_OPENAI_API_KEY=
 AZURE_OPENAI_ENDPOINT=
 AZURE_OPENAI_DEPLOYMENT=
+
+# RAGAS HTTP metrics (separate from OPENAI_MODEL; prefer non–o-series for metric LLM)
+# RAGAS_LLM_MODEL=gpt-4o-mini
+# RAGAS_EMBEDDING_MODEL=text-embedding-3-small
+
 CHROMA_DB_PATH=data/chroma/learning_catalog_db
 LOG_LEVEL=INFO
+
+# Hybrid retrieval candidate breadth on API host (integer, clamped in code)
+LEARNING_PATH_TOP_K=15
+
+# Optional raw data directory and per-workbook overrides
+# LEARNING_PATH_RAW_DIR=
+# LEARNING_PATH_USER_MASTER_XLSX=
+# LEARNING_PATH_COMPLETION_XLSX=
+# LEARNING_PATH_COURSE_MASTER_XLSX=
 ```
 
 ---
@@ -1452,10 +1600,10 @@ When using this document as a build workflow for an agent, follow this order str
 5. build Chroma index
 6. implement services
 7. implement planning engine
-8. implement FastAPI endpoint
-9. implement Streamlit UI
+8. implement FastAPI endpoint (including run logging and RAGAS metrics route)
+9. implement Streamlit UI (chat + RAGAS shortcut)
 10. add optional LLM explanation
-11. add evaluation scripts
+11. add evaluation scripts and runtime RAGAS scoring path
 12. run demo scenarios
 13. document outputs and edge cases
 
@@ -1466,3 +1614,4 @@ Important guardrails for implementation:
 - do not let RAG replace the planner
 - keep recommendation logic reproducible and testable
 - keep practice mapping configurable, not hardcoded inside the endpoint
+- persist session JSON under **`data/evaluation/session_runs/`**; use **`ragas.metrics._faithfulness` / `_answer_relevance`** with **`ragas.evaluate(..., llm=, embeddings=)`** for RAGAS 0.4 compatibility (not `metrics.collections` with `evaluate()`)

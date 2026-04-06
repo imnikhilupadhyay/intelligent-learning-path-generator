@@ -26,6 +26,10 @@ _PORTAL_LABEL_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 _INTEGER_PATTERN = re.compile(r"\b(\d{2,})\b")
 
+_RAGAS_OR_RAG_SCORES = re.compile(
+    r"(?i)\b(ragas|rag\s+scores?|rag\s+metrics?|evaluation\s+scores?)\b",
+)
+
 _EXPERTISE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)\bfocus(?:\s+on)?\s+(.+?)(?:[.,;!?]|\n|$)"),
     re.compile(r"(?i)\bexpertise\s+(?:in|on|:)\s*(.+?)(?:[.,;!?]|\n|$)"),
@@ -86,6 +90,31 @@ def _integers_in_order(text: str) -> list[int]:
             seen.add(n)
             ordered.append(n)
     return ordered
+
+
+def wants_ragas_scores(message: str) -> bool:
+    """Return True if the user is asking for RAGAS-style evaluation scores.
+
+    Used by the Streamlit UI to call ``GET /evaluation/ragas-metrics/{run_id}``
+    for the current session's last plan run.
+
+    Args:
+        message: Raw chat line from the user.
+
+    Returns:
+        Whether the message should trigger a RAGAS metrics fetch.
+    """
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _RAGAS_OR_RAG_SCORES.search(text):
+        return True
+    low = text.lower()
+    if "faithfulness" in low and "score" in low:
+        return True
+    if ("answer relevan" in low or "answer relevance" in low) and "score" in low:
+        return True
+    return False
 
 
 def parse_learning_plan_intent(message: str) -> LearningPlanIntent:

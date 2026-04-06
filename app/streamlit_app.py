@@ -17,6 +17,7 @@ from utils.chat_intent_parse import (  # noqa: E402
     explain_portal_resolution_failure,
     parse_learning_plan_intent,
     resolve_portal_id,
+    wants_ragas_scores,
 )
 
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
@@ -109,6 +110,10 @@ def main() -> None:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "portal_run_ids" not in st.session_state:
+        st.session_state.portal_run_ids = {}
+    if "last_plan_run_id" not in st.session_state:
+        st.session_state.last_plan_run_id = None
 
     with st.sidebar:
         st.markdown("### Connection")
@@ -173,6 +178,78 @@ def main() -> None:
 
         st.session_state.messages.append({"role": "user", "content": prompt})
 
+        if wants_ragas_scores(prompt):
+            run_id = st.session_state.get("last_plan_run_id")
+            if not run_id:
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "**No plan run in this session yet.** "
+                            "Ask for a learning plan first (include a valid **portal id**), "
+                            "then request RAGAS scores."
+                        ),
+                    },
+                )
+                st.rerun()
+            api_base = st.session_state.get("api_base", DEFAULT_API_BASE).rstrip("/")
+            metrics_url = f"{api_base}/evaluation/ragas-metrics/{run_id}"
+            try:
+                mresp = httpx.get(metrics_url, timeout=120.0)
+            except httpx.RequestError as exc:
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": f"**Could not reach the API** at `{metrics_url}`: {exc}",
+                    },
+                )
+                st.rerun()
+            if mresp.status_code >= 400:
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": (
+                            f"**RAGAS API error {mresp.status_code}**\n```\n"
+                            f"{mresp.text[:2000]}\n```"
+                        ),
+                    },
+                )
+                st.rerun()
+            metrics = mresp.json()
+            score_lines = ["### RAGAS scores", ""]
+            rid_display = metrics.get("run_id") or run_id
+            pid_display = metrics.get("portal_id")
+            score_lines.append(f"- **Run ID:** `{rid_display}`")
+            score_lines.append(
+                f"- **Portal ID:** `{pid_display}`"
+                if pid_display is not None
+                else "- **Portal ID:** _not available_",
+            )
+            score_lines.append("")
+            err = metrics.get("error")
+            scores = metrics.get("scores") or {}
+            if err:
+                score_lines.append(f"**Evaluator note:** {err}")
+                score_lines.append("")
+            if scores:
+                score_lines.append("| Metric | Score |")
+                score_lines.append("| --- | --- |")
+                for name in sorted(scores.keys()):
+                    val = scores[name]
+                    try:
+                        score_lines.append(f"| {name} | {float(val):.4f} |")
+                    except (TypeError, ValueError):
+                        score_lines.append(f"| {name} | {val} |")
+            else:
+                score_lines.append("_No numeric scores returned._")
+            score_lines.extend(["", "### What these metrics mean", ""])
+            for name, desc in (metrics.get("metric_descriptions") or {}).items():
+                score_lines.append(f"- **{name}:** {desc}")
+            st.session_state.messages.append(
+                {"role": "assistant", "content": "\n".join(score_lines)},
+            )
+            st.rerun()
+
         valid = _cached_portal_ids()
         intent = parse_learning_plan_intent(prompt)
         portal_id = resolve_portal_id(intent, valid)
@@ -204,6 +281,9 @@ def main() -> None:
                 st.session_state.get("opt_include_optional_courses", False),
             ),
         }
+        prev_run = st.session_state.portal_run_ids.get(portal_id)
+        if prev_run:
+            payload["session_run_id"] = prev_run
         url = st.session_state["api_base"] + "/generate-plan"
         try:
             resp = httpx.post(url, json=payload, timeout=120.0)
@@ -226,6 +306,10 @@ def main() -> None:
             st.rerun()
 
         data = resp.json()
+        new_run = data.get("run_id")
+        if new_run:
+            st.session_state.portal_run_ids[portal_id] = new_run
+            st.session_state.last_plan_run_id = new_run
         summary = _format_plan_markdown(data)
         st.session_state.messages.append({"role": "assistant", "content": summary})
         st.rerun()

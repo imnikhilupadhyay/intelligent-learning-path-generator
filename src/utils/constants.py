@@ -9,6 +9,10 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 DATA_RAW_DIR: Path = PROJECT_ROOT / "data" / "raw"
 DATA_PROCESSED_DIR: Path = PROJECT_ROOT / "data" / "processed"
 CHROMA_DIR: Path = PROJECT_ROOT / "data" / "chroma" / "learning_catalog_db"
+EVALUATION_DIR: Path = PROJECT_ROOT / "data" / "evaluation"
+EVALUATION_RUN_IDS_DIR: Path = EVALUATION_DIR / "run_ids"
+EVALUATION_SESSION_RUNS_DIR: Path = EVALUATION_DIR / "session_runs"
+EVALUATION_SESSION_CSV: Path = EVALUATION_RUN_IDS_DIR / "session.csv"
 CONFIG_DIR: Path = PROJECT_ROOT / "config"
 
 RAW_WORKBOOK_BASE: Path = Path(

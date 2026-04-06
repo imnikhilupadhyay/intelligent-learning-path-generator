@@ -17,6 +17,13 @@ class GeneratePlanRequest(BaseModel):
         default=False,
         description="Add supplemental courses beyond the minimum hour target",
     )
+    session_run_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional UUID from a prior plan in the same client session; "
+            "server reuses it only if the stored session exists and portal_id matches."
+        ),
+    )
 
 
 class RecommendedCourse(BaseModel):
@@ -53,6 +60,21 @@ class GeneratePlanResponse(BaseModel):
     remaining_gap_after_plan: float
     explanation: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    run_id: str = Field(..., description="UUID for this plan run (session logging / RAGAS lookup)")
+    ragas_evaluation_inputs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Question, answer, and contexts for RAG-style evaluation (e.g. RAGAS)",
+    )
+
+
+class RagasMetricsResponse(BaseModel):
+    """JSON body for ``GET /evaluation/ragas-metrics/{run_id}``."""
+
+    run_id: str | None = None
+    portal_id: int | None = None
+    scores: dict[str, float] = Field(default_factory=dict)
+    metric_descriptions: dict[str, str] = Field(default_factory=dict)
+    error: str | None = None
 
 
 class HealthResponse(BaseModel):
