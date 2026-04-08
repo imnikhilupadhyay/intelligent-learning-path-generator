@@ -18,6 +18,15 @@ def test_extract_prerequisite() -> None:
     assert extract_prerequisite_text(s) == "Knowledge of Java"
 
 
+def test_extract_prerequisite_strips_html() -> None:
+    """Prerequisite extraction should return plain text when summary has HTML."""
+    s = (
+        "<p><b>Prerequisite:</b><span> Basics of HTML, CSS, and JavaScript.</span>"
+        "<b>Intended Audience:</b> Engineers</p>"
+    )
+    assert extract_prerequisite_text(s) == "Basics of HTML, CSS, and JavaScript"
+
+
 def test_map_to_catalog() -> None:
     """Fuzzy map prerequisite text to catalog row."""
     df = pd.DataFrame(

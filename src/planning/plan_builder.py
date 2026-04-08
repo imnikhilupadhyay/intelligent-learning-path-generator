@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from planning.prerequisite_resolver import PrerequisiteParseResult
+from utils.text_utils import strip_html_tags
 
 
 def build_recommendation_items(
@@ -46,12 +47,16 @@ def build_recommendation_items(
             hours_f = float(hours) if hours is not None and str(hours) != "nan" else None
         except (TypeError, ValueError):
             hours_f = None
+        prereq_text: str | None = None
+        if isinstance(prereq, str) and prereq.strip():
+            prereq_clean = strip_html_tags(prereq)
+            prereq_text = prereq_clean or None
         out.append(
             {
                 "course_id": cid,
                 "course_name": str(row.get("Course Full Name", "") or ""),
                 "hours": hours_f if hours_f is not None else 2.0,
-                "prerequisite": prereq if isinstance(prereq, str) and prereq.strip() else None,
+                "prerequisite": prereq_text,
                 "reason": reasons_by_id.get(
                     cid,
                     "Selected based on practice relevance and training hour fit.",

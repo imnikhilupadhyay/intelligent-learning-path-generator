@@ -23,3 +23,20 @@ def test_build_recommendation_items() -> None:
     items = build_recommendation_items([89, 5], df, {89: "Not in df", 5: "Because skills"})
     assert len(items) == 1
     assert items[0]["course_id"] == 5
+
+
+def test_build_recommendation_items_sanitizes_prerequisite_html() -> None:
+    """Response payload should not expose raw HTML in prerequisite field."""
+    df = pd.DataFrame(
+        [
+            {
+                "Course ID": 7,
+                "Course Full Name": "MEAN Stack Certification",
+                "parsed_duration_hours": 2.0,
+                "parsed_prerequisite_text": "<br><span>Basics of HTML, CSS, and JavaScript.</span>",
+                "summary": "x",
+            },
+        ],
+    )
+    items = build_recommendation_items([7], df)
+    assert items[0]["prerequisite"] == "Basics of HTML, CSS, and JavaScript."

@@ -7,6 +7,24 @@ import unicodedata
 from typing import Iterable
 
 
+def strip_html_tags(text: str) -> str:
+    """Remove HTML tags and normalize a few common entities.
+
+    Args:
+        text: Raw text that may contain HTML markup.
+
+    Returns:
+        Plain-text approximation with tags removed.
+    """
+    if not isinstance(text, str):
+        return ""
+    # Break lines at <br> before stripping all tags.
+    s = re.sub(r"(?i)<br\s*/?>", " ", text)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = s.replace("&nbsp;", " ").replace("&amp;", "&")
+    return normalize_whitespace(s)
+
+
 def normalize_whitespace(text: str) -> str:
     """Collapse repeated whitespace and strip ends.
 

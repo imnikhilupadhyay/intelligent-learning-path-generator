@@ -8,7 +8,7 @@ from typing import Iterable, Sequence
 
 import pandas as pd
 
-from utils.text_utils import fold_unicode, lowercase_copy, normalize_whitespace
+from utils.text_utils import fold_unicode, lowercase_copy, normalize_whitespace, strip_html_tags
 
 
 @dataclass(frozen=True)
@@ -38,8 +38,9 @@ def extract_prerequisite_text(summary: str | None) -> str | None:
     """
     if not summary or not isinstance(summary, str):
         return None
+    plain = strip_html_tags(summary)
     for pat in _PREREQ_PATTERNS:
-        m = re.search(pat, summary, flags=re.DOTALL)
+        m = re.search(pat, plain, flags=re.DOTALL)
         if m:
             text = normalize_whitespace(m.group(1))
             return text or None
