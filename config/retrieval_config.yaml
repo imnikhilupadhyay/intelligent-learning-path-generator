@@ -1,0 +1,6 @@
+chroma_collection_name: course_master_collection
+# NOTE: API retrieval breadth is controlled by env LEARNING_PATH_TOP_K (see .env.example).
+default_top_k: 15
+keyword_match_weight: 0.4
+semantic_match_weight: 0.6
+merge_dedupe_by_course_id: true
